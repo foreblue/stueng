@@ -60,9 +60,9 @@ Podcast: "{source}" — "{title}"
 ---
 
 Analyze this transcript and extract:
-- vocabulary: 10-15 advanced or domain-specific words (skip basic words). Each with Korean definition, English definition, and exact example sentence from transcript.
-- expressions: 5-7 useful idioms, collocations, or fixed phrases. Each with Korean meaning and usage note.
-- key_sentences: 3-5 sentences worth studying for grammar or natural expression. Each with Korean explanation.
+- vocabulary: exactly 3 advanced or domain-specific words (skip basic words), prioritized by how frequently they are used in everyday English. Each with Korean definition, English definition, and exact example sentence from transcript.
+- expressions: exactly 3 useful idioms, collocations, or fixed phrases, prioritized by how frequently they are used in everyday English. Each with Korean meaning and usage note.
+- key_sentences: exactly 3 sentences worth studying for grammar or natural expression, prioritized by how useful the patterns are in everyday English. Each with Korean explanation.
 
 All Korean text must be natural, fluent Korean. Examples and sentences must be exact quotes from the transcript.
 
