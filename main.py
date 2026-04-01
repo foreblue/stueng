@@ -1,10 +1,17 @@
+from __future__ import annotations
+
+import json
 import logging
 import sys
+from datetime import date
+from pathlib import Path
 
 import config
 import analyzer
 import messenger
 from sources.upfirst import UpFirst
+
+DATA_DIR = Path(__file__).parent / "data"
 
 logging.basicConfig(
     level=logging.INFO,
@@ -53,6 +60,24 @@ def main():
 
             logger.info("Sending to Telegram")
             messenger.send(episode, analysis)
+
+            # 결과 저장
+            DATA_DIR.mkdir(exist_ok=True)
+            today = date.today().strftime("%Y-%m-%d")
+            out_path = DATA_DIR / f"{today}.json"
+            payload = {
+                "date": today,
+                "source": episode.source_name,
+                "title": episode.title,
+                "episode_url": episode.episode_url,
+                "audio_url": episode.audio_url,
+                "published": episode.published,
+                "duration_sec": episode.duration_sec,
+                "transcript": episode.transcript,
+                "analysis": analysis,
+            }
+            out_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+            logger.info("Saved to %s", out_path)
             logger.info("Done")
 
     except Exception as e:
