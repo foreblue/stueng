@@ -42,9 +42,10 @@ JSON_SCHEMA = json.dumps({
                 "type": "object",
                 "properties": {
                     "sentence":       {"type": "string"},
+                    "translation_kr": {"type": "string"},
                     "explanation_kr": {"type": "string"}
                 },
-                "required": ["sentence", "explanation_kr"]
+                "required": ["sentence", "translation_kr", "explanation_kr"]
             }
         }
     },
@@ -62,7 +63,7 @@ Podcast: "{source}" — "{title}"
 Analyze this transcript and extract:
 - vocabulary: exactly 3 advanced or domain-specific words (skip basic words), prioritized by how frequently they are used in everyday English. Each with Korean definition, English definition, and exact example sentence from transcript.
 - expressions: exactly 3 useful idioms, collocations, or fixed phrases, prioritized by how frequently they are used in everyday English. Each with Korean meaning and usage note.
-- key_sentences: exactly 3 sentences worth studying for grammar or natural expression, prioritized by how useful the patterns are in everyday English. Each with Korean explanation.
+- key_sentences: exactly 3 sentences worth studying for grammar or natural expression, prioritized by how useful the patterns are in everyday English. Each with a natural Korean translation (translation_kr) and Korean grammatical explanation (explanation_kr).
 
 All Korean text must be natural, fluent Korean. Examples and sentences must be exact quotes from the transcript.
 

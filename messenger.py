@@ -49,6 +49,7 @@ def _format_analysis(episode: Episode, analysis: dict) -> str:
             def_kr = _e(item.get("definition_kr") or item.get("korean_definition", ""))
             def_en = _e(item.get("definition_en", ""))
             example = _e(item.get("example", ""))
+            lines.append("")
             lines.append(f"• <b>{word}</b> — {def_kr}")
             lines.append(f"  <i>{def_en}</i>")
             if example:
@@ -63,6 +64,7 @@ def _format_analysis(episode: Episode, analysis: dict) -> str:
             expr = _e(item.get("expression") or item.get("phrase", ""))
             meaning = _e(item.get("meaning_kr") or item.get("korean_meaning", ""))
             usage = _e(item.get("usage_note", ""))
+            lines.append("")
             lines.append(f"• <b>{expr}</b>")
             lines.append(f"  뜻: {meaning}")
             if usage:
@@ -75,9 +77,15 @@ def _format_analysis(episode: Episode, analysis: dict) -> str:
         lines.append("📝 <b>핵심 문장 (Key Sentences)</b>")
         for i, item in enumerate(key_sentences, 1):
             sentence = _e(item.get("sentence", ""))
+            translation = _e(item.get("translation_kr", ""))
             explanation = _e(item.get("explanation_kr", ""))
+            lines.append("")
             lines.append(f"{i}. \"{sentence}\"")
+            if translation:
+                lines.append("")
+                lines.append(f"   번역: {translation}")
             if explanation:
+                lines.append("")
                 lines.append(f"   → {explanation}")
 
     return "\n".join(lines)
