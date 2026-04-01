@@ -88,6 +88,7 @@ def analyze(episode: Episode) -> dict:
     # subprocess에서 제거해서 keychain(로그인 세션) 인증을 사용하도록 함
     env = {k: v for k, v in os.environ.items() if k != "ANTHROPIC_API_KEY"}
 
+    logger.info("Claude CLI 실행 중... (모델: sonnet, 전사문 %d자)", len(prompt))
     try:
         result = subprocess.run(
             cmd,
@@ -96,15 +97,16 @@ def analyze(episode: Episode) -> dict:
             timeout=120,
             env=env,
         )
+        logger.info("Claude CLI 응답 수신 (rc=%d, stdout=%d자)", result.returncode, len(result.stdout))
     except subprocess.TimeoutExpired:
-        logger.error("claude CLI timed out")
+        logger.error("Claude CLI 타임아웃 (120s 초과)")
         return {}
     except FileNotFoundError:
-        logger.error("claude CLI not found in PATH")
+        logger.error("Claude CLI를 찾을 수 없음 (PATH 확인 필요)")
         return {}
 
     if result.returncode != 0:
-        logger.error("claude CLI error (rc=%d): stderr=%s stdout=%s",
+        logger.error("Claude CLI 오류 (rc=%d):\n  stderr: %s\n  stdout: %s",
                      result.returncode, result.stderr[:300], result.stdout[:300])
         return {}
 

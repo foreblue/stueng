@@ -47,19 +47,23 @@ def _fetch_transcript(article_id: str) -> str:
 
 class UpFirst(PodcastSource):
     def fetch_latest(self) -> Episode | None:
+        logger.info("RSS 피드 파싱 중: %s", RSS_URL)
         feed = feedparser.parse(RSS_URL)
         if not feed.entries:
-            logger.error("Up First RSS feed is empty")
+            logger.error("Up First RSS 피드가 비어있음")
             return None
 
+        logger.info("RSS 피드 항목 수: %d개, 최신 에피소드 탐색 중...", len(feed.entries))
         for entry in feed.entries:
             article_id = _extract_article_id(entry.link)
             if not article_id:
+                logger.debug("article_id 추출 실패: %s", entry.link)
                 continue
 
+            logger.info("전사문 가져오는 중: %s (id: %s)", entry.title, article_id)
             transcript = _fetch_transcript(article_id)
             if not transcript:
-                logger.info("Skipping %s: no transcript", entry.title)
+                logger.info("전사문 없음, 다음 에피소드로 건너뜀: %s", entry.title)
                 continue
 
             # 오디오 URL: enclosures에서 첫 번째 audio/mpeg
