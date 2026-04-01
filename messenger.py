@@ -131,11 +131,11 @@ def _send_message(text: str) -> bool:
 def send(episode: Episode, analysis: dict) -> None:
     today = date.today().strftime("%Y-%m-%d")
     header = f"🌅 <b>오늘의 영어 공부 — {today}</b>"
-    _send_message(header)
-    time.sleep(0.5)
-
     body = _format_analysis(episode, analysis)
-    for part in _split_message(body):
+    full_message = f"{header}\n\n{body}"
+
+    parts = _split_message(full_message)
+    for part in parts:
         _send_message(part)
         time.sleep(0.5)
 
