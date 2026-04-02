@@ -36,6 +36,7 @@ def _format_analysis(episode: Episode, analysis: dict) -> str:
     lines.append(f"📰 <b>{_e(episode.source_name)}: {_e(episode.title)}</b> (~{duration_min}min)")
     lines.append(
         f"🎧 <a href=\"{_e(episode.audio_url)}\">오디오 듣기</a>  "
+        f"🎙️ <a href=\"https://podcasts.apple.com/podcast/id510318\">Podcasts 앱</a>  "
         f"📄 <a href=\"{_e(episode.episode_url)}\">원문 보기</a>"
     )
 
