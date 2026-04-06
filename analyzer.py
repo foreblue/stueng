@@ -1,56 +1,13 @@
 import json
 import logging
-import os
 import re
-import subprocess
 
+import requests
+
+import config
 from sources.base import Episode
 
 logger = logging.getLogger(__name__)
-
-JSON_SCHEMA = json.dumps({
-    "type": "object",
-    "properties": {
-        "vocabulary": {
-            "type": "array",
-            "items": {
-                "type": "object",
-                "properties": {
-                    "word":          {"type": "string"},
-                    "definition_kr": {"type": "string"},
-                    "definition_en": {"type": "string"},
-                    "example":       {"type": "string"}
-                },
-                "required": ["word", "definition_kr", "definition_en", "example"]
-            }
-        },
-        "expressions": {
-            "type": "array",
-            "items": {
-                "type": "object",
-                "properties": {
-                    "expression": {"type": "string"},
-                    "meaning_kr": {"type": "string"},
-                    "usage_note": {"type": "string"}
-                },
-                "required": ["expression", "meaning_kr", "usage_note"]
-            }
-        },
-        "key_sentences": {
-            "type": "array",
-            "items": {
-                "type": "object",
-                "properties": {
-                    "sentence":       {"type": "string"},
-                    "translation_kr": {"type": "string"},
-                    "explanation_kr": {"type": "string"}
-                },
-                "required": ["sentence", "translation_kr", "explanation_kr"]
-            }
-        }
-    },
-    "required": ["vocabulary", "expressions", "key_sentences"]
-})
 
 PROMPT_TEMPLATE = """You are an English teacher helping a Korean-speaking adult learn English through NPR podcasts.
 
@@ -69,6 +26,29 @@ All Korean text must be natural, fluent Korean. Examples and sentences must be e
 
 Return ONLY valid JSON with no markdown, no explanation, no code fences."""
 
+_CLAUDE_MODEL  = "claude/claude-sonnet-4-6"
+_CURSOR_MODEL  = "cursor/claude-4.6-sonnet-medium-thinking"
+_GEMINI_MODEL  = "gemini/gemini-2.5-pro"
+
+
+def _call_chat(prompt: str, model: str) -> str:
+    url = f"{config.PROXY_URL}/v1/chat/completions"
+    payload = {
+        "model": model,
+        "messages": [{"role": "user", "content": prompt}],
+    }
+    resp = requests.post(url, json=payload, timeout=120)
+    resp.raise_for_status()
+    data = resp.json()
+    return data["choices"][0]["message"]["content"]
+
+
+def _parse_json(raw: str) -> dict:
+    raw = raw.strip()
+    raw = re.sub(r"^```(?:json)?\s*", "", raw)
+    raw = re.sub(r"\s*```$", "", raw)
+    return json.loads(raw)
+
 
 def analyze(episode: Episode) -> dict:
     prompt = PROMPT_TEMPLATE.format(
@@ -77,64 +57,34 @@ def analyze(episode: Episode) -> dict:
         transcript=episode.transcript,
     )
 
-    cmd = [
-        "claude",
-        "-p", prompt,
-        "--output-format", "json",
-        "--model", "sonnet",
+    backends = [
+        ("claude",  lambda: _call_chat(prompt, _CLAUDE_MODEL)),
+        ("cursor",  lambda: _call_chat(prompt, _CURSOR_MODEL)),
+        ("gemini",  lambda: _call_chat(prompt, _GEMINI_MODEL)),
     ]
 
-    # ANTHROPIC_API_KEY가 환경에 있으면 Claude CLI가 keychain 대신 API 키 인증을 시도함
-    # subprocess에서 제거해서 keychain(로그인 세션) 인증을 사용하도록 함
-    env = {k: v for k, v in os.environ.items() if k != "ANTHROPIC_API_KEY"}
+    raw = None
+    for name, call in backends:
+        logger.info("LLM 호출 중... (backend: %s, 전사문 %d자)", name, len(prompt))
+        try:
+            raw = call()
+            logger.info("LLM 응답 수신 (backend: %s, %d자)", name, len(raw))
+            break
+        except requests.exceptions.Timeout:
+            logger.warning("[%s] 타임아웃 — 다음 backend 시도", name)
+        except requests.exceptions.HTTPError as e:
+            logger.warning("[%s] HTTP 오류 %s — 다음 backend 시도", name, e.response.status_code)
+        except Exception as e:
+            logger.warning("[%s] 실패: %s — 다음 backend 시도", name, e)
 
-    logger.info("Claude CLI 실행 중... (모델: sonnet, 전사문 %d자)", len(prompt))
-    try:
-        result = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            timeout=120,
-            env=env,
-        )
-        logger.info("Claude CLI 응답 수신 (rc=%d, stdout=%d자)", result.returncode, len(result.stdout))
-    except subprocess.TimeoutExpired:
-        logger.error("Claude CLI 타임아웃 (120s 초과)")
-        return {}
-    except FileNotFoundError:
-        logger.error("Claude CLI를 찾을 수 없음 (PATH 확인 필요)")
-        return {}
-
-    if result.returncode != 0:
-        logger.error("Claude CLI 오류 (rc=%d):\n  stderr: %s\n  stdout: %s",
-                     result.returncode, result.stderr[:300], result.stdout[:300])
+    if not raw:
+        logger.error("모든 backend 실패. 빈 결과 반환")
         return {}
 
     try:
-        outer = json.loads(result.stdout)
+        return _parse_json(raw)
     except json.JSONDecodeError as e:
-        logger.error("Failed to parse claude CLI outer JSON: %s\nOutput: %s", e, result.stdout[:300])
-        return {}
-
-    # is_error 체크
-    if outer.get("is_error"):
-        logger.error("claude CLI returned is_error=true: %s", outer.get("result", "")[:300])
-        return {}
-
-    inner = outer.get("result", "")
-    if not inner:
-        logger.error("claude CLI empty result. Full output: %s", result.stdout[:500])
-        return {}
-
-    try:
-        if isinstance(inner, str):
-            # 코드펜스 제거
-            inner = re.sub(r"^```(?:json)?\s*", "", inner.strip())
-            inner = re.sub(r"\s*```$", "", inner)
-            return json.loads(inner)
-        return inner
-    except json.JSONDecodeError as e:
-        logger.error("JSON parse failed: %s\nResult: %s", e, str(inner)[:300])
+        logger.error("JSON 파싱 실패: %s\n응답: %s", e, raw[:300])
         return {}
 
 
