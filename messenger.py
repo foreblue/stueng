@@ -18,7 +18,7 @@ def _e(text: str) -> str:
     return html.escape(str(text))
 
 
-def _format_analysis(episode: Episode, analysis: dict) -> str:
+def _format_analysis(episode: Episode, analysis: dict, fail_reason: str = "") -> str:
     # raw fallback
     if "raw" in analysis:
         duration_min = episode.duration_sec // 60
@@ -89,6 +89,12 @@ def _format_analysis(episode: Episode, analysis: dict) -> str:
                 lines.append("")
                 lines.append(f"   → {explanation}")
 
+    # 분석 실패 사유
+    if fail_reason:
+        lines.append("")
+        lines.append("⚠️ <b>AI 분석 실패</b>")
+        lines.append(f"<pre>{_e(fail_reason)}</pre>")
+
     return "\n".join(lines)
 
 
@@ -129,10 +135,10 @@ def _send_message(text: str) -> bool:
     return False
 
 
-def send(episode: Episode, analysis: dict) -> None:
+def send(episode: Episode, analysis: dict, *, fail_reason: str = "") -> None:
     today = date.today().strftime("%Y-%m-%d")
     header = f"🌅 <b>오늘의 영어 공부 — {today}</b>"
-    body = _format_analysis(episode, analysis)
+    body = _format_analysis(episode, analysis, fail_reason=fail_reason)
     full_message = f"{header}\n\n{body}"
 
     parts = _split_message(full_message)

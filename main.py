@@ -83,13 +83,13 @@ def main():
             )
 
             # 4단계: AI 분석
-            logger.info("[4/5] AI 분석 시작 (Claude CLI 호출)...")
+            logger.info("[4/5] AI 분석 시작...")
             t0 = time.time()
-            analysis = analyzer.analyze(episode)
+            analysis, fail_reason = analyzer.analyze(episode)
             elapsed = time.time() - t0
 
             if not analysis:
-                logger.warning("[4/5] 분석 결과 없음 (%.1fs). 빈 분석으로 진행합니다.", elapsed)
+                logger.warning("[4/5] 분석 결과 없음 (%.1fs): %s", elapsed, fail_reason)
             else:
                 vocab_count = len(analysis.get("vocabulary", []))
                 expr_count = len(analysis.get("expressions", []))
@@ -105,7 +105,7 @@ def main():
             # 5단계: 텔레그램 전송
             logger.info("[5/5] 텔레그램 전송 중...")
             t0 = time.time()
-            messenger.send(episode, analysis)
+            messenger.send(episode, analysis, fail_reason=fail_reason)
             elapsed = time.time() - t0
             logger.info("[5/5] 텔레그램 전송 완료 (%.1fs)", elapsed)
 

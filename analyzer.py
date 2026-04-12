@@ -50,7 +50,11 @@ def _parse_json(raw: str) -> dict:
     return json.loads(raw)
 
 
-def analyze(episode: Episode) -> dict:
+def analyze(episode: Episode) -> tuple[dict, str]:
+    """에피소드를 분석하여 (결과 dict, 실패사유) 튜플을 반환한다.
+
+    성공 시 실패사유는 빈 문자열, 실패 시 결과는 빈 dict.
+    """
     prompt = PROMPT_TEMPLATE.format(
         source=episode.source_name,
         title=episode.title,
@@ -64,28 +68,39 @@ def analyze(episode: Episode) -> dict:
     ]
 
     raw = None
+    errors = []
     for name, call in backends:
         logger.info("LLM 호출 중... (backend: %s, 전사문 %d자)", name, len(prompt))
         try:
             raw = call()
             logger.info("LLM 응답 수신 (backend: %s, %d자)", name, len(raw))
             break
+        except requests.exceptions.ConnectionError:
+            reason = f"[{name}] 프록시 연결 실패 ({config.PROXY_URL})"
+            errors.append(reason)
+            logger.warning("%s — 다음 backend 시도", reason)
         except requests.exceptions.Timeout:
-            logger.warning("[%s] 타임아웃 — 다음 backend 시도", name)
+            reason = f"[{name}] 타임아웃 (120초 초과)"
+            errors.append(reason)
+            logger.warning("%s — 다음 backend 시도", reason)
         except requests.exceptions.HTTPError as e:
-            logger.warning("[%s] HTTP 오류 %s — 다음 backend 시도", name, e.response.status_code)
+            reason = f"[{name}] HTTP 오류 {e.response.status_code}"
+            errors.append(reason)
+            logger.warning("%s — 다음 backend 시도", reason)
         except Exception as e:
-            logger.warning("[%s] 실패: %s — 다음 backend 시도", name, e)
+            reason = f"[{name}] {e}"
+            errors.append(reason)
+            logger.warning("%s — 다음 backend 시도", reason)
 
     if not raw:
         logger.error("모든 backend 실패. 빈 결과 반환")
-        return {}
+        return {}, "\n".join(errors)
 
     try:
-        return _parse_json(raw)
+        return _parse_json(raw), ""
     except json.JSONDecodeError as e:
         logger.error("JSON 파싱 실패: %s\n응답: %s", e, raw[:300])
-        return {}
+        return {}, f"LLM 응답 JSON 파싱 실패: {e}"
 
 
 if __name__ == "__main__":
@@ -99,5 +114,7 @@ if __name__ == "__main__":
         sys.exit(1)
 
     print(f"Analyzing: {ep.title}")
-    result = analyze(ep)
+    result, reason = analyze(ep)
+    if reason:
+        print(f"Failure: {reason}")
     print(json.dumps(result, ensure_ascii=False, indent=2))
