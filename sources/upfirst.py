@@ -55,9 +55,19 @@ class UpFirst(PodcastSource):
 
         logger.info("RSS 피드 항목 수: %d개, 최신 에피소드 탐색 중...", len(feed.entries))
         for entry in feed.entries:
-            article_id = _extract_article_id(entry.link)
+            link = getattr(entry, "link", None)
+            if not link:
+                logger.warning(
+                    "upfirst RSS entry에 link 없음, 스킵: title=%r guid=%r published=%r",
+                    getattr(entry, "title", ""),
+                    getattr(entry, "id", ""),
+                    getattr(entry, "published", ""),
+                )
+                continue
+
+            article_id = _extract_article_id(link)
             if not article_id:
-                logger.debug("article_id 추출 실패: %s", entry.link)
+                logger.debug("article_id 추출 실패: %s", link)
                 continue
 
             logger.info("전사문 가져오는 중: %s (id: %s)", entry.title, article_id)
@@ -83,7 +93,7 @@ class UpFirst(PodcastSource):
                 audio_url=audio_url,
                 transcript=transcript,
                 source_name="Up First",
-                episode_url=entry.link,
+                episode_url=link,
                 duration_sec=duration_sec,
                 published=entry.get("published", ""),
             )
