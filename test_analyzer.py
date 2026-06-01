@@ -67,9 +67,13 @@ def test_http_error_reason_includes_response_body():
 
 def test_default_models_keep_cursor_and_codex_only():
     assert analyzer.config.DEFAULT_AI_MODELS == [
-        "opus-4.8",
         "gpt-5.5",
+        "opus-4.8",
     ]
+
+
+def test_default_timeout_allows_slow_weekly_models():
+    assert analyzer.config.AI_TIMEOUT_SEC == 300
 
 
 if __name__ == "__main__":
@@ -77,6 +81,7 @@ if __name__ == "__main__":
         test_analyze_uses_configured_models_in_order,
         test_http_error_reason_includes_response_body,
         test_default_models_keep_cursor_and_codex_only,
+        test_default_timeout_allows_slow_weekly_models,
     ]
     failed = 0
     for test in tests:

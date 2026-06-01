@@ -12,6 +12,7 @@ class Episode:
     episode_url: str     # 원문 페이지 링크
     duration_sec: int    # 재생 시간(초)
     published: str       # 발행일 문자열
+    podcast_url: str = "" # Podcast 앱 episode 링크
 
 
 class PodcastSource(ABC):

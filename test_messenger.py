@@ -1,6 +1,7 @@
 """messenger.py 포맷 테스트"""
 import sys
 import os
+from datetime import date
 
 sys.path.insert(0, os.path.dirname(__file__))
 
@@ -9,7 +10,7 @@ os.environ.setdefault("TELEGRAM_BOT_TOKEN", "fake_token")
 os.environ.setdefault("TELEGRAM_CHAT_ID", "123456")
 
 from sources.base import Episode
-from messenger import _format_analysis, _split_message
+from messenger import _format_analysis, _format_weekly_lesson, _split_message
 
 SAMPLE_EPISODE = Episode(
     title="Test Podcast Episode",
@@ -128,6 +129,102 @@ def test_example_sentence_fallback():
     print("PASS: example_sentence fallback 정상 동작")
 
 
+def test_weekly_lesson_format():
+    lesson = {
+        "day": 2,
+        "vocabulary": [
+            {
+                "word": "loophole",
+                "definition_kr": "허점",
+                "definition_en": "an ambiguity that can be exploited",
+                "example": "They found a loophole.",
+            }
+        ],
+        "expressions": [
+            {
+                "expression": "tie it back to",
+                "meaning_kr": "~와 연결 짓다",
+                "usage_note": "어떤 주제를 더 큰 맥락과 연결할 때 씁니다.",
+                "example": "We can tie it back to the economy.",
+            }
+        ],
+    }
+    result = _format_weekly_lesson(
+        SAMPLE_EPISODE,
+        lesson,
+        run_date=date(2026, 6, 5),
+        start_date=date(2026, 6, 4),
+        total_days=5,
+    )
+    assert "Day 2/5" in result
+    assert "오늘의 주요 단어 3개" in result
+    assert "loophole" in result
+    assert "tie it back to" in result
+    assert "Podcasts 앱" in result
+    print("PASS: 주간 학습 포맷 정상 동작")
+
+
+def test_weekly_lesson_uses_podcast_episode_url_for_listen_link():
+    episode = Episode(
+        title="Planet Money Episode",
+        audio_url="https://example.com/audio.mp3",
+        transcript="",
+        source_name="Planet Money",
+        episode_url="https://www.npr.org/episode",
+        duration_sec=600,
+        published="2026-06-03",
+        podcast_url="https://podcasts.apple.com/us/podcast/example/id290783428?i=123",
+    )
+    lesson = {"day": 1, "vocabulary": [], "expressions": []}
+    result = _format_weekly_lesson(
+        episode,
+        lesson,
+        run_date=date(2026, 6, 4),
+        start_date=date(2026, 6, 4),
+        total_days=5,
+    )
+    assert 'href="https://podcasts.apple.com/us/podcast/example/id290783428?i=123"' in result
+    assert 'href="https://example.com/audio.mp3"' not in result
+    print("PASS: 주간 학습 오디오 링크 episode URL 사용")
+
+
+def test_weekly_lesson_uses_episode_url_for_podcasts_app_link():
+    episode = Episode(
+        title="Planet Money Episode",
+        audio_url="https://example.com/audio.mp3",
+        transcript="",
+        source_name="Planet Money",
+        episode_url="https://www.npr.org/episode",
+        duration_sec=600,
+        published="2026-06-03",
+        podcast_url="https://podcasts.apple.com/us/podcast/example/id290783428?i=123",
+    )
+    lesson = {"day": 1, "vocabulary": [], "expressions": []}
+    result = _format_weekly_lesson(
+        episode,
+        lesson,
+        run_date=date(2026, 6, 4),
+        start_date=date(2026, 6, 4),
+        total_days=5,
+    )
+    assert 'Podcasts 앱</a>' in result
+    assert result.count('href="https://podcasts.apple.com/us/podcast/example/id290783428?i=123"') == 2
+    print("PASS: Podcasts 앱 링크 episode URL 사용")
+
+
+def test_weekly_lesson_day_display_skips_weekends():
+    lesson = {"day": 7, "vocabulary": [], "expressions": []}
+    result = _format_weekly_lesson(
+        SAMPLE_EPISODE,
+        lesson,
+        run_date=date(2026, 6, 2),
+        start_date=date(2026, 5, 27),
+        total_days=5,
+    )
+    assert "Day 5/5" in result
+    print("PASS: 주간 학습 회차 표시 주말 제외")
+
+
 if __name__ == "__main__":
     tests = [
         test_translation_in_message,
@@ -136,6 +233,10 @@ if __name__ == "__main__":
         test_message_split,
         test_html_escape,
         test_example_sentence_fallback,
+        test_weekly_lesson_format,
+        test_weekly_lesson_uses_podcast_episode_url_for_listen_link,
+        test_weekly_lesson_uses_episode_url_for_podcasts_app_link,
+        test_weekly_lesson_day_display_skips_weekends,
     ]
     failed = 0
     for t in tests:

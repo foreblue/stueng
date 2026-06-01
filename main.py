@@ -10,6 +10,7 @@ from pathlib import Path
 import config
 import analyzer
 import messenger
+from sources.planetmoney import PlanetMoney
 from sources.upfirst import UpFirst
 
 DATA_DIR = Path(__file__).parent / "data"
@@ -22,6 +23,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 SOURCE_REGISTRY = {
+    "planetmoney": PlanetMoney,
     "upfirst": UpFirst,
 }
 

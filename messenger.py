@@ -98,6 +98,75 @@ def _format_analysis(episode: Episode, analysis: dict, fail_reason: str = "") ->
     return "\n".join(lines)
 
 
+def _format_weekly_lesson(
+    episode: Episode,
+    lesson: dict,
+    *,
+    run_date: date,
+    start_date: date,
+    total_days: int,
+) -> str:
+    study_day = 0
+    current = start_date
+    while current <= run_date:
+        if current.weekday() < 5:
+            study_day += 1
+        current = date.fromordinal(current.toordinal() + 1)
+
+    day = study_day or int(lesson.get("day") or 1)
+    duration_min = episode.duration_sec // 60
+    listen_url = episode.podcast_url or episode.episode_url or episode.audio_url
+    podcast_app_url = episode.podcast_url or "https://podcasts.apple.com/podcast/id290783428"
+
+    lines = [
+        f"🌍 <b>Planet Money 영어 공부 — {run_date:%Y-%m-%d}</b>",
+        f"<b>Day {day}/{total_days}</b>",
+        "",
+        f"📰 <b>{_e(episode.title)}</b> (~{duration_min}min)",
+        (
+            f"🎧 <a href=\"{_e(listen_url)}\">오디오 듣기</a>  "
+            f"🎙️ <a href=\"{_e(podcast_app_url)}\">Podcasts 앱</a>  "
+            f"📄 <a href=\"{_e(episode.episode_url)}\">원문 보기</a>"
+        ),
+    ]
+
+    vocabulary = lesson.get("vocabulary", [])
+    if vocabulary:
+        lines.append("")
+        lines.append("📚 <b>오늘의 주요 단어 3개</b>")
+        for item in vocabulary:
+            word = _e(item.get("word", ""))
+            def_kr = _e(item.get("definition_kr") or item.get("korean_definition", ""))
+            def_en = _e(item.get("definition_en", ""))
+            example = _e(item.get("example") or item.get("example_sentence", ""))
+            lines.append("")
+            lines.append(f"• <b>{word}</b> — {def_kr}")
+            if def_en:
+                lines.append(f"  <i>{def_en}</i>")
+            if example:
+                lines.append(f"  예문: \"{example}\"")
+
+    expressions = lesson.get("expressions", [])
+    if expressions:
+        lines.append("")
+        lines.append("💬 <b>오늘의 주요 표현 3개</b>")
+        for item in expressions:
+            expr = _e(item.get("expression") or item.get("phrase", ""))
+            meaning = _e(item.get("meaning_kr") or item.get("korean_meaning", ""))
+            usage = _e(item.get("usage_note", ""))
+            example = _e(item.get("example", ""))
+            lines.append("")
+            lines.append(f"• <b>{expr}</b>")
+            if meaning:
+                lines.append(f"  뜻: {meaning}")
+            if usage:
+                lines.append(f"  사용법: {usage}")
+            if example:
+                lines.append(f"  예문: \"{example}\"")
+
+    return "\n".join(lines)
+
+
 def _split_message(text: str) -> list[str]:
     if len(text) <= config.TELEGRAM_MAX_LENGTH:
         return [text]
@@ -145,6 +214,29 @@ def send(episode: Episode, analysis: dict, *, fail_reason: str = "") -> None:
     for part in parts:
         _send_message(part)
         time.sleep(0.5)
+
+
+def send_weekly_lesson(
+    episode: Episode,
+    lesson: dict,
+    *,
+    run_date: date,
+    start_date: date,
+    total_days: int,
+) -> bool:
+    text = _format_weekly_lesson(
+        episode,
+        lesson,
+        run_date=run_date,
+        start_date=start_date,
+        total_days=total_days,
+    )
+
+    ok = True
+    for part in _split_message(text):
+        ok = _send_message(part) and ok
+        time.sleep(0.5)
+    return ok
 
 
 def send_error(message: str) -> None:
