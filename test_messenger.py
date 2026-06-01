@@ -109,6 +109,25 @@ def test_html_escape():
     print("PASS: HTML 이스케이프 정상 동작")
 
 
+def test_example_sentence_fallback():
+    """LLM이 example_sentence 키를 써도 예문이 표시되는지 확인"""
+    analysis = {
+        "vocabulary": [
+            {
+                "word": "sedentary",
+                "definition_kr": "앉아서 지내는",
+                "definition_en": "spending much time seated",
+                "example_sentence": "Modern life is increasingly sedentary.",
+            }
+        ],
+        "expressions": [],
+        "key_sentences": [],
+    }
+    result = _format_analysis(SAMPLE_EPISODE, analysis)
+    assert "Modern life is increasingly sedentary." in result
+    print("PASS: example_sentence fallback 정상 동작")
+
+
 if __name__ == "__main__":
     tests = [
         test_translation_in_message,
@@ -116,6 +135,7 @@ if __name__ == "__main__":
         test_no_translation_field_graceful,
         test_message_split,
         test_html_escape,
+        test_example_sentence_fallback,
     ]
     failed = 0
     for t in tests:

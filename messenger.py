@@ -49,7 +49,7 @@ def _format_analysis(episode: Episode, analysis: dict, fail_reason: str = "") ->
             word = _e(item.get("word", ""))
             def_kr = _e(item.get("definition_kr") or item.get("korean_definition", ""))
             def_en = _e(item.get("definition_en", ""))
-            example = _e(item.get("example", ""))
+            example = _e(item.get("example") or item.get("example_sentence", ""))
             lines.append("")
             lines.append(f"• <b>{word}</b> — {def_kr}")
             lines.append(f"  <i>{def_en}</i>")

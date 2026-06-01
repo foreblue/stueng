@@ -18,17 +18,64 @@ Podcast: "{source}" — "{title}"
 ---
 
 Analyze this transcript and extract:
-- vocabulary: exactly 3 advanced or domain-specific words (skip basic words), prioritized by how frequently they are used in everyday English. Each with Korean definition, English definition, and exact example sentence from transcript.
-- expressions: exactly 3 useful idioms, collocations, or fixed phrases, prioritized by how frequently they are used in everyday English. Each with Korean meaning and usage note.
-- key_sentences: exactly 3 sentences worth studying for grammar or natural expression, prioritized by how useful the patterns are in everyday English. Each with a natural Korean translation (translation_kr) and Korean grammatical explanation (explanation_kr).
+- vocabulary: exactly 3 advanced or domain-specific words (skip basic words), prioritized by how frequently they are used in everyday English.
+- expressions: exactly 3 useful idioms, collocations, or fixed phrases, prioritized by how frequently they are used in everyday English.
+- key_sentences: exactly 3 sentences worth studying for grammar or natural expression, prioritized by how useful the patterns are in everyday English.
+
+Use this exact JSON shape and key names:
+{{
+  "vocabulary": [
+    {{
+      "word": "string",
+      "definition_kr": "natural Korean definition",
+      "definition_en": "English definition",
+      "example": "exact quote from the transcript"
+    }}
+  ],
+  "expressions": [
+    {{
+      "expression": "string",
+      "meaning_kr": "natural Korean meaning",
+      "usage_note": "Korean usage note"
+    }}
+  ],
+  "key_sentences": [
+    {{
+      "sentence": "exact quote from the transcript",
+      "translation_kr": "natural Korean translation",
+      "explanation_kr": "Korean grammatical explanation"
+    }}
+  ]
+}}
 
 All Korean text must be natural, fluent Korean. Examples and sentences must be exact quotes from the transcript.
 
 Return ONLY valid JSON with no markdown, no explanation, no code fences."""
 
-_CLAUDE_MODEL  = "claude/claude-sonnet-4-6"
-_CURSOR_MODEL  = "cursor/claude-4.6-sonnet-medium-thinking"
-_GEMINI_MODEL  = "gemini/gemini-2.5-pro"
+
+def _backend_label(model: str) -> str:
+    if model.startswith("gemini-"):
+        return "gemini"
+    if model.startswith("gpt-"):
+        return "codex"
+    cursor_prefixes = ("claude-4.6", "claude-opus-4-8", "opus-4.8")
+    if model.startswith(cursor_prefixes):
+        return "cursor"
+    if model.startswith("claude-"):
+        return "claude"
+    return model
+
+
+def _response_excerpt(response: requests.Response | None) -> str:
+    if response is None:
+        return ""
+
+    text = response.text.strip().replace("\n", " ")
+    if not text:
+        return ""
+    if len(text) > 240:
+        text = f"{text[:237]}..."
+    return f": {text}"
 
 
 def _call_chat(prompt: str, model: str) -> str:
@@ -37,7 +84,7 @@ def _call_chat(prompt: str, model: str) -> str:
         "model": model,
         "messages": [{"role": "user", "content": prompt}],
     }
-    resp = requests.post(url, json=payload, timeout=120)
+    resp = requests.post(url, json=payload, timeout=config.AI_TIMEOUT_SEC)
     resp.raise_for_status()
     data = resp.json()
     return data["choices"][0]["message"]["content"]
@@ -62,29 +109,29 @@ def analyze(episode: Episode) -> tuple[dict, str]:
     )
 
     backends = [
-        ("claude",  lambda: _call_chat(prompt, _CLAUDE_MODEL)),
-        ("cursor",  lambda: _call_chat(prompt, _CURSOR_MODEL)),
-        ("gemini",  lambda: _call_chat(prompt, _GEMINI_MODEL)),
+        (model, _backend_label(model), lambda model=model: _call_chat(prompt, model))
+        for model in config.AI_MODELS
     ]
 
     raw = None
     errors = []
-    for name, call in backends:
-        logger.info("LLM 호출 중... (backend: %s, 전사문 %d자)", name, len(prompt))
+    for model, name, call in backends:
+        logger.info("LLM 호출 중... (backend: %s, model: %s, 전사문 %d자)", name, model, len(prompt))
         try:
             raw = call()
-            logger.info("LLM 응답 수신 (backend: %s, %d자)", name, len(raw))
+            logger.info("LLM 응답 수신 (backend: %s, model: %s, %d자)", name, model, len(raw))
             break
         except requests.exceptions.ConnectionError:
             reason = f"[{name}] 프록시 연결 실패 ({config.PROXY_URL})"
             errors.append(reason)
             logger.warning("%s — 다음 backend 시도", reason)
         except requests.exceptions.Timeout:
-            reason = f"[{name}] 타임아웃 (120초 초과)"
+            reason = f"[{name}] 타임아웃 ({config.AI_TIMEOUT_SEC}초 초과, model: {model})"
             errors.append(reason)
             logger.warning("%s — 다음 backend 시도", reason)
         except requests.exceptions.HTTPError as e:
-            reason = f"[{name}] HTTP 오류 {e.response.status_code}"
+            status = e.response.status_code if e.response is not None else "unknown"
+            reason = f"[{name}] HTTP 오류 {status} (model: {model}){_response_excerpt(e.response)}"
             errors.append(reason)
             logger.warning("%s — 다음 backend 시도", reason)
         except Exception as e:
