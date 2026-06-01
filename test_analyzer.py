@@ -67,8 +67,8 @@ def test_http_error_reason_includes_response_body():
 
 def test_default_models_keep_cursor_and_codex_only():
     assert analyzer.config.DEFAULT_AI_MODELS == [
-        "gpt-5.5",
         "opus-4.8",
+        "gpt-5.5",
     ]
 
 
