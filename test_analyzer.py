@@ -65,11 +65,18 @@ def test_http_error_reason_includes_response_body():
     assert "claude-4.6-sonnet-medium-thinking" in reason
 
 
-def test_default_models_keep_cursor_and_codex_only():
+def test_default_models_keep_cursor_and_claude():
     assert analyzer.config.DEFAULT_AI_MODELS == [
         "opus-4.8",
-        "gpt-5.5",
+        "auto",
+        "claude/claude-opus-4-8",
     ]
+
+
+def test_backend_label_resolves_claude_provider_prefix():
+    assert analyzer._backend_label("claude/claude-opus-4-8") == "claude"
+    assert analyzer._backend_label("opus-4.8") == "cursor"
+    assert analyzer._backend_label("auto") == "cursor"
 
 
 def test_default_timeout_allows_slow_weekly_models():
@@ -80,7 +87,8 @@ if __name__ == "__main__":
     tests = [
         test_analyze_uses_configured_models_in_order,
         test_http_error_reason_includes_response_body,
-        test_default_models_keep_cursor_and_codex_only,
+        test_default_models_keep_cursor_and_claude,
+        test_backend_label_resolves_claude_provider_prefix,
         test_default_timeout_allows_slow_weekly_models,
     ]
     failed = 0

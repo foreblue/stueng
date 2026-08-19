@@ -30,10 +30,11 @@ DEFAULT_AI_MODELS = [
     # gemini backend은 현재 기본 요청 대상에서 제외.
     # "gemini-2.5-flash",
     # "gemini-2.5-pro",
-    # anthropic claude backend은 현재 기본 요청 대상에서 제외.
-    # "claude-sonnet-4-6",
+    # codex backend은 현재 기본 요청 대상에서 제외.
+    # "gpt-5.5",
     "opus-4.8",  # cursor backend
-    "gpt-5.5",  # codex backend
+    "auto",  # cursor backend
+    "claude/claude-opus-4-8",  # anthropic claude backend
 ]
 AI_MODELS = _env_csv("AI_MODELS", ",".join(DEFAULT_AI_MODELS))
 AI_TIMEOUT_SEC = _env_int("AI_TIMEOUT_SEC", 300)

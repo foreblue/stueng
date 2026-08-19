@@ -54,10 +54,22 @@ Return ONLY valid JSON with no markdown, no explanation, no code fences."""
 
 
 def _backend_label(model: str) -> str:
+    if "/" in model:
+        provider = model.split("/", 1)[0].lower()
+        if provider in ("anthropic", "claude"):
+            return "claude"
+        if provider == "cursor":
+            return "cursor"
+        if provider in ("google", "gemini"):
+            return "gemini"
+        if provider == "codex":
+            return "codex"
     if model.startswith("gemini-"):
         return "gemini"
     if model.startswith("gpt-"):
         return "codex"
+    if model == "auto":
+        return "cursor"
     cursor_prefixes = ("claude-4.6", "claude-opus-4-8", "opus-4.8")
     if model.startswith(cursor_prefixes):
         return "cursor"
