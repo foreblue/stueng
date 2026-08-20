@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#2c6a5c">
+<title>{% block title %}단어{% endblock %} · stueng</title>
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="icon" href="/static/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/static/icon.svg">
+<link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+<header class="bar">
+  <a class="brand" href="/">단어</a>
+  <nav>
+    <a href="/study" {% if active == 'study' %}class="on"{% endif %}>복습</a>
+    <a href="/write" {% if active == 'write' %}class="on"{% endif %}>쓰기</a>
+    <a href="/words" {% if active == 'words' %}class="on"{% endif %}>어휘</a>
+    <a href="/stats" {% if active == 'stats' %}class="on"{% endif %}>기록</a>
+  </nav>
+</header>
+
+<main class="{% block main_class %}{% endblock %}">
+{% block content %}{% endblock %}
+</main>
+
+<script src="/static/study.js" defer></script>
+</body>
+</html>

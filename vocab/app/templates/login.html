@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>로그인 · stueng</title>
+<link rel="icon" href="/static/icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+<main class="narrow center">
+  <form class="panel stack" method="post" action="/login">
+    <h1 class="title">단어</h1>
+    <p class="muted">전사에서 모은 어휘를 복습합니다.</p>
+    {% if error %}<p class="alert">{{ error }}</p>{% endif %}
+    <input type="password" name="password" placeholder="비밀번호" autofocus
+           autocomplete="current-password" required>
+    <button type="submit" class="primary">들어가기</button>
+  </form>
+</main>
+</body>
+</html>

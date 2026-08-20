@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+{% set active = 'write' %}
+{% block title %}쓰기{% endblock %}
+{% block content %}
+
+{% if not task %}
+  <section class="panel stack">
+    <h2 class="section-title">이번 주 과제 없음</h2>
+    <p class="note">쓰기 과제는 이미 여러 번 인출해 본 단어로만 냅니다.
+      아직 그런 카드가 모자랍니다 — 며칠 복습하고 다시 오세요.</p>
+  </section>
+{% else %}
+  <section class="panel stack">
+    <div class="card-head">
+      <h2 class="section-title">{{ task.week_start }} 주 · 이 세 단어로 써 보기</h2>
+      {% if task.feedback %}<span class="chip">첨삭 완료</span>
+      {% elif task.awaiting_feedback %}<span class="chip">첨삭 대기</span>{% endif %}
+    </div>
+
+    <ul class="task-words">
+      {% for word in task.word_list %}
+        <li><a href="/words/{{ word.id }}"><b>{{ word.display }}</b></a>
+          <span class="muted">{{ word.meaning_kr }}</span></li>
+      {% endfor %}
+    </ul>
+
+    <p class="note">고르기·빈칸보다 쓰기가 오래 남습니다. 세 단어를 모두 넣어
+      한 문단(3~5문장)을 쓰세요. 사전을 베끼지 말고 내 이야기로 씁니다.</p>
+
+    {% if error %}<p class="alert">{{ error }}</p>{% endif %}
+
+    <form method="post" action="/write" class="stack">
+      <textarea name="text" rows="8" placeholder="Write here…"
+                spellcheck="false">{{ task.text or '' }}</textarea>
+      <button type="submit" class="primary block">
+        {% if task.text %}고쳐서 다시 제출{% else %}제출{% endif %}
+      </button>
+    </form>
+
+    {% if task.feedback %}
+      <div class="feedback">{{ task.feedback }}</div>
+    {% elif task.awaiting_feedback %}
+      <p class="note">제출했습니다. 첨삭은 맥북의 워커가 돌 때 붙습니다
+        (<code>python -m vocab.tutor</code>).</p>
+    {% endif %}
+  </section>
+{% endif %}
+
+{% if history | length > 1 or (history and not task) %}
+  <section class="panel stack">
+    <h2 class="section-title">지난 과제</h2>
+    <ul class="occurrences">
+      {% for past in history %}
+        {% if not task or past.id != task.id %}
+          <li>
+            <p class="source">{{ past.week_start }} ·
+              {{ past.word_list | map(attribute='display') | join(', ') }}</p>
+            {% if past.text %}<blockquote class="quote">{{ past.text }}</blockquote>{% endif %}
+            {% if past.feedback %}<div class="feedback">{{ past.feedback }}</div>{% endif %}
+          </li>
+        {% endif %}
+      {% endfor %}
+    </ul>
+  </section>
+{% endif %}
+{% endblock %}

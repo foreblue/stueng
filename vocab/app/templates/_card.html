@@ -1,0 +1,52 @@
+{% if not question %}
+  <section class="panel stack center">
+    <h2 class="section-title">지금 낼 카드가 없습니다</h2>
+    {% if progress.next_due %}
+      <p class="note">학습 단계 카드가 <b>{{ progress.next_due | until }}</b> 뒤에 돌아옵니다.
+        분산이 효과의 절반이라, 지금 몰아서 더 푸는 것보다 시간을 두는 편이 낫습니다.</p>
+    {% else %}
+      <p class="note">오늘 몫을 다 했습니다.</p>
+    {% endif %}
+    <a class="ghost block" href="/">홈으로</a>
+  </section>
+{% else %}
+  <section class="panel stack">
+    <div class="card-head">
+      <span class="chip {{ question.stage }}">
+        {% if question.stage == 'recognition' %}뜻 고르기
+        {% elif question.stage == 'cloze' %}빈칸 채우기
+        {% else %}영어로 말하기{% endif %}
+      </span>
+      <span class="muted small">남은 {{ state.remaining }}장</span>
+    </div>
+
+    {% if question.leech %}
+      <p class="note warn">여러 번 놓친 카드입니다. 맞히면 이 표시는 사라집니다.</p>
+    {% endif %}
+
+    <p class="prompt {{ question.stage }}">{{ question.prompt }}</p>
+
+    {% if question.hint %}<p class="hint">{{ question.hint }}</p>{% endif %}
+
+    <form id="answer-form" method="post" action="/study/answer" autocomplete="off">
+      <input type="hidden" name="token" value="{{ token }}">
+
+      {% if question.choices %}
+        <div class="choices">
+          {% for choice in question.choices %}
+            <button type="submit" name="given" value="{{ choice }}" class="choice">
+              <kbd>{{ loop.index }}</kbd><span>{{ choice }}</span>
+            </button>
+          {% endfor %}
+        </div>
+      {% else %}
+        {# 타이핑 단계에만 자기평가를 둔다. 4지선다에서는 반응 시간이라는 객관 지표로
+           충분하고, 보기를 고르기 전에 "쉬움"을 누르게 하면 반사적으로 눌리기 쉽다. #}
+        <input type="text" name="given" class="typed" autofocus autocapitalize="none"
+               autocorrect="off" spellcheck="false" placeholder="영어로 입력">
+        <label class="toggle"><input type="checkbox" name="easy" value="1"> 이건 쉬웠어요</label>
+        <button type="submit" class="primary block">확인</button>
+      {% endif %}
+    </form>
+  </section>
+{% endif %}

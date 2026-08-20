@@ -1,0 +1,5 @@
+<form id="known-form" method="post" action="/words/{{ word.id }}/known">
+  <button type="submit" class="{{ 'ghost' if word.known else 'primary' }}">
+    {% if word.known %}다시 학습하기{% else %}이미 아는 단어{% endif %}
+  </button>
+</form>

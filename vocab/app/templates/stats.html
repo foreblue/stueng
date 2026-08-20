@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+{% set active = 'stats' %}
+{% block title %}기록{% endblock %}
+{% block content %}
+<section class="panel stack">
+  <h2 class="section-title">전체</h2>
+  <dl class="facts">
+    <div><dt>누적 복습</dt><dd>{{ reviews_total }}</dd></div>
+    <div><dt>30일 정답률</dt>
+      <dd>{% if accuracy_overall is none %}—{% else %}{{ (accuracy_overall * 100) | round | int }}%{% endif %}</dd></div>
+    <div><dt>스케줄러</dt><dd>{{ target_retention }}</dd></div>
+    <div><dt>학습 중인 카드</dt><dd>{{ progress.total_cards }}</dd></div>
+  </dl>
+  <p class="note">목표 정답률은 85~90%입니다. 이보다 높으면 간격이 너무 짧아 낭비이고,
+    낮으면 인출이 실패해 이득이 사라집니다.</p>
+</section>
+
+<section class="panel stack">
+  <h2 class="section-title">형식별 정답률 (30일)</h2>
+  {% if by_stage %}
+    <ul class="bars">
+      {% for stage, pair in by_stage.items() %}
+        {% set pct = (pair[0] * 100) | round | int %}
+        <li>
+          <span class="bar-label">{{ stage }}</span>
+          <span class="bar"><i style="width: {{ pct }}%"></i></span>
+          <span class="bar-value">{{ pct }}% <small>({{ pair[1] }})</small></span>
+        </li>
+      {% endfor %}
+    </ul>
+    <p class="note">형식이 올라갈수록 정답률이 떨어지는 것은 정상입니다.
+      인출 노력이 커진 만큼 기억에 남는 것도 많아집니다.</p>
+  {% else %}
+    <p class="muted">아직 기록이 없습니다.</p>
+  {% endif %}
+</section>
+
+<section class="panel stack">
+  <h2 class="section-title">날짜별</h2>
+  {% if daily %}
+    <table class="log">
+      <thead><tr><th>날짜</th><th>푼 문제</th><th>정답률</th></tr></thead>
+      <tbody>
+        {% for day, rate, count in daily %}
+          <tr><td>{{ day }}</td><td>{{ count }}</td><td>{{ (rate * 100) | round | int }}%</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% else %}
+    <p class="muted">아직 기록이 없습니다.</p>
+  {% endif %}
+</section>
+
+<section class="panel stack">
+  <h2 class="section-title">저장소</h2>
+  <dl class="facts">
+    {% for band, count in bands.items() %}<div><dt>{{ band }}</dt><dd>{{ count }}</dd></div>{% endfor %}
+  </dl>
+  <dl class="facts">
+    {% for stage, count in stages.items() %}<div><dt>{{ stage }}</dt><dd>{{ count }}</dd></div>{% endfor %}
+  </dl>
+  <a class="ghost block" href="/export">전체 백업 내려받기</a>
+  <p class="note">복습 기록은 로컬에 원본이 없는 유일한 데이터입니다. 가끔 내려받아 두세요.</p>
+</section>
+{% endblock %}

@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% set active = 'words' %}
+{% block title %}어휘{% endblock %}
+{% block content %}
+<form class="panel filters" method="get" action="/words">
+  <input type="search" name="q" value="{{ q }}" placeholder="단어나 뜻으로 찾기">
+  <select name="band">
+    <option value="">모든 밴드</option>
+    {% for b in bands %}
+      <option value="{{ b }}" {% if band == b %}selected{% endif %}>
+        {% if b == 'core' %}core — 학습 가치 높음
+        {% elif b == 'known' %}known — 이미 알 확률 높음
+        {% else %}rare — 조어·초희귀어{% endif %}
+      </option>
+    {% endfor %}
+  </select>
+  <button type="submit" class="ghost">찾기</button>
+</form>
+
+<p class="muted small count-line">{{ total }}개</p>
+
+<ul class="words">
+  {% for word in words %}
+    <li>
+      <a href="/words/{{ word.id }}">
+        <span class="w-display">{{ word.display }}</span>
+        <span class="w-meaning">{{ word.meaning_kr }}</span>
+      </a>
+      <span class="w-tags">
+        <span class="tag {{ word.band }}">{{ word.band }}</span>
+        {% if word.known %}<span class="tag known-mark">앎</span>
+        {% elif word.card %}<span class="tag stage">{{ word.card.stage }}</span>
+        {% else %}<span class="tag pending">대기</span>{% endif %}
+      </span>
+    </li>
+  {% else %}
+    <li class="empty">해당하는 어휘가 없습니다.</li>
+  {% endfor %}
+</ul>
+
+{% if pages > 1 %}
+  <nav class="pager">
+    {% if page > 1 %}<a href="/words?q={{ q }}&band={{ band }}&page={{ page - 1 }}">이전</a>{% endif %}
+    <span class="muted small">{{ page }} / {{ pages }}</span>
+    {% if page < pages %}<a href="/words?q={{ q }}&band={{ band }}&page={{ page + 1 }}">다음</a>{% endif %}
+  </nav>
+{% endif %}
+{% endblock %}
