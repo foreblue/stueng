@@ -1,0 +1,75 @@
+{% extends "base.html" %}
+{% set active = 'words' %}
+{% block title %}{{ word.display }}{% endblock %}
+{% block content %}
+<section class="panel stack">
+  <div class="card-head">
+    <h1 class="title">{{ word.display }}</h1>
+    <span class="tag {{ word.band }}">{{ word.band }}{% if word.zipf %} · zipf {{ '%.2f' | format(word.zipf) }}{% endif %}</span>
+  </div>
+  <p class="meaning">{{ word.meaning_kr }}</p>
+  {% if word.meaning_en %}<p class="muted">{{ word.meaning_en }}</p>{% endif %}
+  {% if word.usage_note %}<p class="note">{{ word.usage_note }}</p>{% endif %}
+  {% if word.mnemonic %}
+    <div class="mnemonic">
+      <span class="chip">기억술</span>
+      <p>{{ word.mnemonic }}</p>
+      <p class="muted small">여러 번 놓친 카드라 붙인 보조 장치입니다.
+        기억술은 초기 회상에 강하고 시간이 지나면 이점이 줄어듭니다 — 결국 인출이 본체입니다.</p>
+    </div>
+  {% endif %}
+
+  <div id="known-slot">{% include "_known_button.html" %}</div>
+</section>
+
+<section class="panel stack">
+  <h2 class="section-title">등장한 문맥 {{ word.occurrences | length }}개</h2>
+  {% if word.occurrences | length > 1 %}
+    <p class="note">문맥이 여럿이라 복습할 때마다 다른 문장으로 나옵니다.
+      한 문맥만 반복하면 그 문맥에 묶인 기억이 됩니다.</p>
+  {% endif %}
+  <ul class="occurrences">
+    {% for o in word.occurrences | reverse %}
+      <li>
+        <blockquote class="quote">{{ o.sentence }}</blockquote>
+        <p class="source">
+          <span class="tag src-{{ o.source_kind }}">{{ o.source_kind }}</span>
+          {% if o.source_url %}<a href="{{ o.source_url }}" target="_blank" rel="noopener">{{ o.source_title }}</a>
+          {% else %}{{ o.source_title }}{% endif %}
+          · {{ o.occurred_on }}
+        </p>
+      </li>
+    {% else %}
+      <li class="empty">예문이 없습니다. 빈칸 문제는 건너뛰고 4지선다와 산출로만 나옵니다.</li>
+    {% endfor %}
+  </ul>
+</section>
+
+{% if word.card %}
+<section class="panel stack">
+  <h2 class="section-title">학습 상태</h2>
+  <dl class="facts">
+    <div><dt>단계</dt><dd>{{ word.card.stage }}</dd></div>
+    <div><dt>다음 복습</dt><dd>{{ word.card.due | until }} 뒤</dd></div>
+    <div><dt>안정성</dt><dd>{% if word.card.stability %}{{ word.card.stability | round(1) }}일{% else %}—{% endif %}</dd></div>
+    <div><dt>복습 / 실패</dt><dd>{{ word.card.reps }} / {{ word.card.lapses }}</dd></div>
+  </dl>
+  {% if reviews %}
+    <table class="log">
+      <thead><tr><th>시각</th><th>형식</th><th>결과</th><th>rating</th><th>반응</th></tr></thead>
+      <tbody>
+      {% for r in reviews %}
+        <tr>
+          <td>{{ r.reviewed_at | localtime }}</td>
+          <td>{{ r.stage }}</td>
+          <td class="{{ 'ok' if r.correct else 'no' }}">{{ 'O' if r.correct else 'X' }}</td>
+          <td>{{ r.rating }}</td>
+          <td>{% if r.response_ms %}{{ (r.response_ms / 1000) | round(1) }}s{% else %}—{% endif %}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  {% endif %}
+</section>
+{% endif %}
+{% endblock %}

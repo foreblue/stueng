@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% set active = 'home' %}
+{% block content %}
+<section class="panel stack">
+  <div class="counts">
+    <a class="count {% if progress.due or progress.unresolved %}accent{% endif %}" href="/study">
+      <b>{{ progress.due + progress.unresolved }}</b><span>복습할 카드</span>
+    </a>
+    <div class="count"><b>{{ progress.new_available }}</b><span>오늘 새로 들일 단어</span></div>
+  </div>
+
+  {% set total = progress.due + progress.unresolved + progress.new_available %}
+  {% if total %}
+    <a class="primary block" href="/study">시작하기</a>
+    {% if progress.unresolved %}
+      <p class="note">아직 못 맞힌 카드가 {{ progress.unresolved }}장 있습니다. 맞힐 때까지 다시 나옵니다.</p>
+    {% endif %}
+  {% elif progress.next_due %}
+    <p class="note">지금 낼 카드가 없습니다. 다음 카드는
+      <b>{{ progress.next_due | until }}</b> 뒤에 나옵니다.</p>
+  {% else %}
+    <p class="note">오늘 몫을 다 했습니다.</p>
+  {% endif %}
+</section>
+
+<section class="panel stack">
+  <h2 class="section-title">오늘</h2>
+  <dl class="facts">
+    <div><dt>푼 문제</dt><dd>{{ progress.reviewed_today }}</dd></div>
+    <div><dt>정답률</dt>
+      <dd>{% if progress.accuracy_today is none %}—
+          {% else %}{{ (progress.accuracy_today * 100) | round | int }}%{% endif %}</dd></div>
+    <div><dt>학습 중인 카드</dt><dd>{{ progress.total_cards }}</dd></div>
+    <div><dt>모아둔 어휘</dt><dd>{{ progress.total_words }}</dd></div>
+  </dl>
+  {% if progress.accuracy_today is not none and progress.reviewed_today >= 10 %}
+    {% set pct = (progress.accuracy_today * 100) | round | int %}
+    {% if pct > 95 %}
+      <p class="note">정답률이 높습니다. 간격이 너무 짧다는 신호일 수 있습니다 — 목표는 85~90%입니다.</p>
+    {% elif pct < 75 %}
+      <p class="note">정답률이 낮습니다. 하루에 들이는 새 단어를 줄여 보세요.</p>
+    {% endif %}
+  {% endif %}
+</section>
+{% endblock %}

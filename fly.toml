@@ -1,0 +1,42 @@
+# Fly.io 배포 설정.
+#
+# 혼자 쓰는 앱이라 머신 하나면 충분하다. auto_stop/auto_start 로 안 쓸 때는 꺼 두고
+# 요청이 오면 1초 안에 깨운다 — Render 무료 티어의 50초 콜드스타트로는 "열면 바로
+# 푼다"가 성립하지 않는다.
+#
+# min_machines_running = 0 이면 첫 요청이 조금 느리다. 아침 알림을 받고 여는 패턴이라
+# 그 정도는 감수한다. 늘 즉시 열리길 원하면 1로 올린다 (월 2~3달러).
+
+app = "stueng-vocab"           # fly launch 할 때 실제 이름으로 바뀐다
+primary_region = "nrt"         # 도쿄. 서울에서 가장 가깝다.
+
+[build]
+
+[env]
+  VOCAB_ENV = "production"
+  VOCAB_TZ = "Asia/Seoul"
+  PORT = "8080"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = "suspend"
+  auto_start_machines = true
+  min_machines_running = 0
+  processes = ["app"]
+
+  [http_service.concurrency]
+    type = "requests"
+    hard_limit = 50
+    soft_limit = 25
+
+[[http_service.checks]]
+  grace_period = "10s"
+  interval = "30s"
+  method = "GET"
+  path = "/healthz"
+  timeout = "5s"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"

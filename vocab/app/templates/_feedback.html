@@ -1,0 +1,43 @@
+<section class="panel stack">
+  <div class="verdict {{ 'ok' if result.correct else 'no' }}">
+    {% if result.correct and result.near_miss %}거의 맞음
+    {% elif result.correct %}정답
+    {% else %}오답{% endif %}
+  </div>
+
+  {% if not result.correct and given.strip() %}
+    <p class="given">입력: <s>{{ given }}</s></p>
+  {% endif %}
+
+  <p class="answer">{{ result.answer }}</p>
+  <p class="meaning">{{ result.meaning_kr }}</p>
+  {% if result.near_miss %}
+    <p class="note">맞은 것으로 처리했지만 완전한 정답은 아니라 다음 간격을 짧게 잡았습니다.</p>
+  {% endif %}
+
+  {% if mnemonic %}
+    <div class="mnemonic"><span class="chip">기억술</span><p>{{ mnemonic }}</p></div>
+  {% endif %}
+
+  {% if result.sentence %}
+    <blockquote class="quote">{{ result.sentence }}</blockquote>
+    {% if result.source_label %}
+      <p class="source">
+        {% if result.source_url %}<a href="{{ result.source_url }}" target="_blank" rel="noopener">{{ result.source_label }}</a>
+        {% else %}{{ result.source_label }}{% endif %}
+      </p>
+    {% endif %}
+  {% endif %}
+
+  <p class="muted small">
+    {% if result.correct %}다음 복습은
+      {% if result.interval_days >= 1 %}{{ result.interval_days }}일 뒤{% else %}잠시 뒤{% endif %}입니다.
+    {% else %}이 카드는 오늘 세션 안에서 다시 나옵니다.{% endif %}
+    · 남은 {{ result.remaining }}장
+  </p>
+
+  <div class="row">
+    <button id="next" class="primary block" type="button" data-url="/study/card">다음</button>
+    <a class="ghost" href="/words/{{ word_id }}">자세히</a>
+  </div>
+</section>
