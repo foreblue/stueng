@@ -20,8 +20,10 @@ Podcast: "{source}" — "{title}"
 
 Create a 5-day weekday study plan from this transcript.
 
+{vocabulary_instruction}
+
 For each day:
-- vocabulary: exactly 3 advanced, domain-specific, or high-utility words from the transcript.
+- vocabulary: exactly 3 words for that day.
 - expressions: exactly 3 useful idioms, collocations, or fixed phrases from the transcript.
 
 Prefer items that are useful in everyday English, business, economics, policy, or news conversations.
@@ -103,6 +105,7 @@ def analyze_weekly(episode: Episode) -> tuple[dict, str]:
         source=episode.source_name,
         title=episode.title,
         transcript=episode.transcript,
+        vocabulary_instruction=analyzer.weekly_vocabulary_instruction(episode.transcript),
     )
 
     errors = []
