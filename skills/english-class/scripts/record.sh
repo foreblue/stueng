@@ -96,6 +96,27 @@ case "$cmd" in
       VOL=$(ffmpeg -hide_banner -nostdin -i "$f" -af volumedetect -f null - 2>&1 | sed -n 's/.*mean_volume: //p')
       echo "  $(basename "$f")  ${DUR:+$((DUR/60))분 $((DUR%60))초}  $(du -h "$f"|cut -f1)${VOL:+  평균음량 $VOL}"
     done
+    # 트랙 간 시작 지연과 샘플 유실은 소리로는 드러나지 않는다. 여기서 한 번 짚어 준다.
+    if [ -f "$PREFIX-sync.json" ]; then
+      python3 - "$PREFIX-sync.json" <<'PYSYNC'
+import json, sys
+try:
+    d = json.load(open(sys.argv[1]))
+except Exception:
+    sys.exit(0)
+t, m = d.get("tutor", {}), d.get("me", {})
+skew = abs(float(t.get("offset", 0) or 0) - float(m.get("offset", 0) or 0))
+if skew >= 0.5:
+    late = "나" if float(m.get("offset", 0) or 0) > float(t.get("offset", 0) or 0) else "강사"
+    print(f"  트랙 시작 어긋남 {skew:.1f}초 ({late} 트랙이 늦음) — 전사 병합 때 보정된다")
+else:
+    print(f"  트랙 싱크 정상 (어긋남 {skew:.2f}초)")
+for key, name in (("tutor", "강사"), ("me", "나")):
+    lost = int(d.get(key, {}).get("dropped", 0) or 0)
+    if lost:
+        print(f"  경고: {name} 트랙 샘플 {lost}개 유실 — 그 뒤 시각이 밀렸을 수 있다")
+PYSYNC
+    fi
     echo "프리픽스: $PREFIX"
     ;;
 

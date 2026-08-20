@@ -3,7 +3,11 @@
 
 트랙이 나뉘어 있으므로 화자는 추정이 아니라 확정이다.
 
-    merge_transcript.py <tutor.json> <me.json> <출력.md>
+    merge_transcript.py <tutor.json> <me.json> <출력.md> [sync.json]
+
+sync.json 이 있으면 트랙별 시작 지연(offset)을 더해 두 트랙의 시각을 같은 기준에
+올린다. 각 m4a 의 t=0 은 그 트랙의 첫 샘플이라, 보정하지 않으면 늦게 시작한 트랙의
+발화가 실제보다 이른 시각에 찍힌다.
 """
 import json
 import re
@@ -48,7 +52,7 @@ def drop_echo(tutor_segs, me_segs):
     return kept, dropped
 
 
-def load(path, speaker):
+def load(path, speaker, offset=0.0):
     p = Path(path)
     if not p.exists():
         return []
@@ -58,8 +62,21 @@ def load(path, speaker):
         text = seg.get("text", "").strip()
         if not text:
             continue
-        out.append((seg.get("start", 0.0), speaker, text))
+        out.append((seg.get("start", 0.0) + offset, speaker, text))
     return out
+
+
+def load_sync(path):
+    """녹음기가 남긴 트랙별 시작 지연·유실 정보. 없으면 보정 없이 진행한다."""
+    if not path:
+        return {}
+    p = Path(path)
+    if not p.exists():
+        return {}
+    try:
+        return json.loads(p.read_text())
+    except (ValueError, OSError):
+        return {}
 
 
 def hhmmss(sec):
@@ -68,13 +85,15 @@ def hhmmss(sec):
 
 
 def main():
-    if len(sys.argv) != 4:
+    if not 4 <= len(sys.argv) <= 5:
         print(__doc__, file=sys.stderr)
         return 2
 
     tutor_json, me_json, out_path = sys.argv[1:4]
-    tutor_segs = load(tutor_json, "Tutor")
-    me_segs = load(me_json, "Me")
+    sync = load_sync(sys.argv[4] if len(sys.argv) > 4 else None)
+    offsets = {k: float(sync.get(k, {}).get("offset", 0.0) or 0.0) for k in ("tutor", "me")}
+    tutor_segs = load(tutor_json, "Tutor", offsets["tutor"])
+    me_segs = load(me_json, "Me", offsets["me"])
     me_raw = len(me_segs)
     me_segs, echoes = drop_echo(tutor_segs, me_segs)
 
@@ -102,6 +121,19 @@ def main():
     if echoes:
         print(f"내 트랙에서 강사 목소리가 새어든 {echoes}개 세그먼트를 제거했다 "
               f"(스피커로 들으면 생긴다 — 헤드셋을 쓰면 깨끗해진다)")
+
+    skew = abs(offsets["tutor"] - offsets["me"])
+    if skew >= 0.5:
+        late = "내" if offsets["me"] > offsets["tutor"] else "강사"
+        print(f"두 트랙의 시작이 {skew:.1f}초 어긋나 있어 보정했다 ({late} 트랙이 늦게 시작)")
+    for key, name in (("tutor", "강사"), ("me", "내")):
+        lost = int(sync.get(key, {}).get("dropped", 0) or 0)
+        if lost:
+            print(f"경고: {name} 트랙 녹음 중 샘플 {lost}개가 유실됐다 — "
+                  f"그 지점 이후 시각이 밀렸을 수 있다", file=sys.stderr)
+    if not sync:
+        print("참고: sync.json 이 없어 트랙 간 시작 지연을 보정하지 못했다 "
+              "(구버전 녹음기로 만든 파일)")
     if n_tutor == 0:
         print("경고: 강사 트랙이 비었다 — 시스템 오디오가 녹음되지 않았다", file=sys.stderr)
     if n_me == 0:

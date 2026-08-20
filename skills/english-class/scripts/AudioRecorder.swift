@@ -42,16 +42,55 @@ final class Meter: @unchecked Sendable {
     }
 }
 
+/// 두 트랙이 공유하는 세션 원점. 먼저 도착한 샘플의 PTS 가 원점이 된다.
+/// 트랙마다 첫 샘플이 도착하는 시각이 다르므로(마이크 워밍업 등), 그 차이를
+/// 여기서 재두지 않으면 두 파일이 조용히 어긋난 채로 남는다.
+final class SessionClock: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value: CMTime?
+
+    /// 원점을 확정하고(최초 1회) 그 값을 돌려준다.
+    func resolve(first pts: CMTime) -> CMTime {
+        lock.lock(); defer { lock.unlock() }
+        if let v = value { return v }
+        value = pts
+        return pts
+    }
+
+    var origin: CMTime? {
+        lock.lock(); defer { lock.unlock() }
+        return value
+    }
+}
+
 final class TrackWriter {
+    /// 트랙 한 개의 녹음 결과. 종료 시 경고와 sync.json 에 쓰인다.
+    struct Stats {
+        let label: String
+        let file: String
+        let offset: Double     // 세션 원점 대비 이 트랙이 늦게 시작한 양(초)
+        let duration: Double   // 첫 샘플 ~ 마지막 샘플
+        let appended: Int
+        let dropped: Int
+    }
+
     private let writer: AVAssetWriter
     private let input: AVAssetWriterInput
     private var started = false
     private let queue = DispatchQueue(label: "trackwriter")
+    private let clock: SessionClock
+    private var firstPTS: CMTime?
+    private var lastPTS: CMTime?
+    private var appended = 0
+    private var dropped = 0
     let url: URL
+    let label: String
     let meter = Meter()
 
-    init(url: URL) throws {
+    init(url: URL, label: String, clock: SessionClock) throws {
         self.url = url
+        self.label = label
+        self.clock = clock
         try? FileManager.default.removeItem(at: url)
         writer = try AVAssetWriter(outputURL: url, fileType: .m4a)
         input = AVAssetWriterInput(mediaType: .audio, outputSettings: [
@@ -66,15 +105,42 @@ final class TrackWriter {
 
     func append(_ sample: CMSampleBuffer) {
         meter.feed(TrackWriter.rms(sample))
+        let pts = CMSampleBufferGetPresentationTimeStamp(sample)
+        // 어느 트랙이 먼저 오든 원점은 한 번만 정해진다.
+        _ = clock.resolve(first: pts)
         queue.sync {
             if !started {
                 guard writer.startWriting() else { return }
-                writer.startSession(atSourceTime: CMSampleBufferGetPresentationTimeStamp(sample))
+                // 파일의 t=0 은 이 트랙의 첫 샘플이다 — 앞에 빈 구간을 만들지 않아야
+                // ffmpeg/whisper 가 편집 목록을 어떻게 해석하든 결과가 흔들리지 않는다.
+                // 두 트랙이 어긋난 양은 sync.json 에 남겨 병합 단계에서 보정한다.
+                writer.startSession(atSourceTime: pts)
+                firstPTS = pts
                 started = true
             }
+            lastPTS = pts
             if input.isReadyForMoreMediaData {
                 input.append(sample)
+                appended += 1
+            } else {
+                // 인코더가 밀리면 이 샘플은 사라진다. 조용히 넘기면 트랙만 짧아지고
+                // 그 뒤가 통째로 밀리므로, 최소한 몇 개를 버렸는지는 세어 둔다.
+                dropped += 1
             }
+        }
+    }
+
+    var stats: Stats {
+        queue.sync {
+            let origin = clock.origin
+            let offset: Double
+            if let f = firstPTS, let o = origin { offset = (f - o).seconds } else { offset = 0 }
+            let duration: Double
+            if let f = firstPTS, let l = lastPTS { duration = (l - f).seconds } else { duration = 0 }
+            return Stats(label: label, file: url.lastPathComponent,
+                         offset: offset.isFinite ? offset : 0,
+                         duration: duration.isFinite ? duration : 0,
+                         appended: appended, dropped: dropped)
         }
     }
 
@@ -89,6 +155,20 @@ final class TrackWriter {
             return
         }
         await writer.finishWriting()
+
+        let s = stats
+        if s.offset > 0.5 {
+            warn("경고: \(s.label) 트랙이 다른 트랙보다 \(String(format: "%.1f", s.offset))초 늦게 시작했다 "
+                 + "— \(s.file) 의 시각은 그만큼 당겨져 있다(병합 때 sync.json 으로 보정된다)")
+        }
+        if s.dropped > 0 {
+            warn("경고: \(s.label) 트랙에서 샘플 \(s.dropped)개를 놓쳤다 "
+                 + "(기록 \(s.appended)개) — 인코더가 밀렸다. 그만큼 이 트랙이 짧아졌다")
+        }
+    }
+
+    private func warn(_ msg: String) {
+        FileHandle.standardError.write((msg + "\n").data(using: .utf8)!)
     }
 
     private static func rms(_ sample: CMSampleBuffer) -> Float {
@@ -326,8 +406,11 @@ struct Main {
 
         Task { @MainActor in
             do {
-                let tutor = try TrackWriter(url: URL(fileURLWithPath: "\(prefix)-tutor.m4a"))
-                let me = try TrackWriter(url: URL(fileURLWithPath: "\(prefix)-me.m4a"))
+                let clock = SessionClock()
+                let tutor = try TrackWriter(url: URL(fileURLWithPath: "\(prefix)-tutor.m4a"),
+                                            label: "강사", clock: clock)
+                let me = try TrackWriter(url: URL(fileURLWithPath: "\(prefix)-me.m4a"),
+                                         label: "나", clock: clock)
                 let output = Output(tutor: tutor, me: me)
 
                 let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: false)
@@ -365,6 +448,7 @@ struct Main {
                         try? await stream.stopCapture()
                         await tutor.finish()
                         await me.finish()
+                        Main.writeSync(prefix: prefix, tracks: [tutor.stats, me.stats])
                         print("stopped")
                         exit(0)
                     }
@@ -418,4 +502,25 @@ struct Main {
 
     /// 스트림과 라이터도 마찬가지다. Task 블록이 끝날 때 해제되면 캡처가 조용히 멈춘다.
     nonisolated(unsafe) static var retained: [AnyObject] = []
+
+    /// 트랙별 시작 지연·유실을 <프리픽스>-sync.json 에 남긴다.
+    /// 각 m4a 의 t=0 은 그 트랙의 첫 샘플이므로, 병합 단계에서 offset 을 더해야
+    /// 두 트랙의 시각이 같은 기준 위에 놓인다.
+    static func writeSync(prefix: String, tracks: [TrackWriter.Stats]) {
+        var payload: [String: Any] = ["version": 1]
+        for t in tracks {
+            let key = t.file.hasSuffix("-tutor.m4a") ? "tutor" : "me"
+            payload[key] = [
+                "file": t.file,
+                "label": t.label,
+                "offset": t.offset,       // 세션 원점 대비 시작 지연(초)
+                "duration": t.duration,
+                "appended": t.appended,
+                "dropped": t.dropped,
+            ]
+        }
+        guard let data = try? JSONSerialization.data(withJSONObject: payload,
+                                                     options: [.prettyPrinted, .sortedKeys]) else { return }
+        try? data.write(to: URL(fileURLWithPath: "\(prefix)-sync.json"))
+    }
 }

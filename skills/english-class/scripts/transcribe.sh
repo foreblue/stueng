@@ -36,13 +36,15 @@ if [ -n "$PREFIX" ]; then
     [ -f "$SRC" ] || { echo "없음: $SRC (건너뜀)"; continue; }
     echo "전사 중 ($role): $(basename "$SRC")"
     mlx_whisper "$SRC" --model "$MODEL" --language "$LANG" \
+      --condition-on-previous-text False \
       --output-dir "$SDIR" --output-name "transcript-$role" \
       --output-format json --verbose False
     ANY=1
   done
   [ "$ANY" = "1" ] || { echo "전사할 트랙이 없다: $PREFIX-{tutor,me}.m4a" >&2; exit 1; }
   python3 "$HERE/merge_transcript.py" \
-    "$SDIR/transcript-tutor.json" "$SDIR/transcript-me.json" "$SDIR/transcript.md"
+    "$SDIR/transcript-tutor.json" "$SDIR/transcript-me.json" "$SDIR/transcript.md" \
+    "$PREFIX-sync.json"
   echo "완료: $SDIR/transcript.md"
   exit 0
 fi
@@ -83,6 +85,7 @@ ffmpeg -nostdin -y -loglevel error -i "$FILE" -vn -ac 1 -ar 16000 -c:a pcm_s16le
 # 3) 전사
 echo "전사 중... (모델: $MODEL)"
 mlx_whisper "$WAV" --model "$MODEL" --language "$LANG" \
+  --condition-on-previous-text False \
   --output-dir "$SDIR" --output-name transcript \
   --output-format all --verbose False
 
