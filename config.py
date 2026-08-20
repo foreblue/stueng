@@ -41,6 +41,12 @@ AI_TIMEOUT_SEC = _env_int("AI_TIMEOUT_SEC", 300)
 
 TELEGRAM_MAX_LENGTH = 4096
 
+# 복습 웹앱 (vocab). 어휘는 여기로 밀어 올리고, 텔레그램은 링크만 건다.
+VOCAB_SERVER_URL = os.environ.get("VOCAB_SERVER_URL", "").rstrip("/")
+VOCAB_INGEST_TOKEN = os.environ.get("VOCAB_INGEST_TOKEN", "")
+#: 알림에 넣을 사용자용 주소. 보통 서버 주소와 같다.
+VOCAB_APP_URL = os.environ.get("VOCAB_APP_URL", "") or VOCAB_SERVER_URL
+
 # 활성 소스 목록 - 추가 시 여기에 이름 추가
 # 예: ACTIVE_SOURCES = ["upfirst", "planetmoney"]
 ACTIVE_SOURCES = ["upfirst"]

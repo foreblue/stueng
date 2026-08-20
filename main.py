@@ -104,10 +104,14 @@ def main():
                     sent_count,
                 )
 
-            # 5단계: 텔레그램 전송
+            # 5단계: 텔레그램에 에피소드 알림
+            # 어휘 본문은 보내지 않는다. 읽기만 하는 노출은 학습이 되지 않으므로
+            # 꺼내는 일은 복습 웹앱이 맡고, 여기서는 팟캐스트를 듣게만 만든다.
             logger.info("[5/5] 텔레그램 전송 중...")
             t0 = time.time()
-            messenger.send(episode, analysis, fail_reason=fail_reason)
+            messenger.send_episode(
+                episode, app_url=config.VOCAB_APP_URL, fail_reason=fail_reason
+            )
             elapsed = time.time() - t0
             logger.info("[5/5] 텔레그램 전송 완료 (%.1fs)", elapsed)
 

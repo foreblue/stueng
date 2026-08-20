@@ -84,17 +84,9 @@ def _study_dates(start_date: date) -> list[date]:
     return dates
 
 
-def _lesson_for_date(plan: dict, run_date: date) -> dict | None:
+def _first_study_date(plan: dict) -> date:
     start_date = datetime.strptime(plan["start_date"], "%Y-%m-%d").date()
-    study_dates = _study_dates(start_date)
-    if run_date not in study_dates:
-        return None
-
-    offset = study_dates.index(run_date)
-    lessons = plan.get("weekly_analysis", {}).get("lessons", [])
-    if offset >= len(lessons):
-        return None
-    return lessons[offset]
+    return _study_dates(start_date)[0]
 
 
 def prepare(run_date: date) -> Path:
@@ -127,6 +119,12 @@ def prepare(run_date: date) -> Path:
 
 
 def send(run_date: date) -> bool:
+    """새 Planet Money 에피소드를 한 번 알린다.
+
+    예전에는 평일마다 그날 몫의 단어·표현을 보냈다. 지금은 어휘를 꺼내는 일을 복습
+    웹앱이 맡으므로, 텔레그램은 "이번 주 에피소드가 이것" 이라고 한 번 알리는 데까지만
+    한다. 주간 분석 자체는 계속 만든다 — 그게 어휘 저장소의 재료다.
+    """
     config.validate()
 
     path = _latest_plan_path()
@@ -134,9 +132,8 @@ def send(run_date: date) -> bool:
         raise RuntimeError("저장된 Planet Money 주간 학습 계획이 없습니다. 먼저 prepare를 실행하세요.")
 
     plan = _load_plan(path)
-    lesson = _lesson_for_date(plan, run_date)
-    if not lesson:
-        logger.info("오늘 전송할 Planet Money 주간 학습 항목 없음: %s", run_date)
+    if run_date != _first_study_date(plan):
+        logger.info("이번 주 에피소드는 이미 첫날에 알렸습니다: %s", run_date)
         return False
 
     run_date_text = f"{run_date:%Y-%m-%d}"
@@ -146,30 +143,23 @@ def send(run_date: date) -> bool:
         return False
 
     episode = _episode_from_payload(plan["episode"])
-    ok = messenger.send_weekly_lesson(
-        episode,
-        lesson,
-        run_date=run_date,
-        start_date=datetime.strptime(plan["start_date"], "%Y-%m-%d").date(),
-        total_days=len(_study_dates(datetime.strptime(plan["start_date"], "%Y-%m-%d").date())),
-    )
-    if not ok:
-        raise RuntimeError(f"Planet Money 주간 학습 텔레그램 전송 실패: {run_date_text}")
+    if not messenger.send_episode(episode, app_url=config.VOCAB_APP_URL):
+        raise RuntimeError(f"Planet Money 에피소드 알림 전송 실패: {run_date_text}")
 
     sent_dates.append(run_date_text)
     _save_plan(path, plan)
-    logger.info("Planet Money 주간 학습 전송 완료: %s", run_date_text)
+    logger.info("Planet Money 에피소드 알림 전송 완료: %s", run_date_text)
     return True
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Planet Money 주간 영어 학습 prepare/send")
+    parser = argparse.ArgumentParser(description="Planet Money 주간 어휘 준비 / 에피소드 알림")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     prepare_parser = subparsers.add_parser("prepare", help="최신 Planet Money 에피소드로 평일 5일치 학습 계획 생성")
     prepare_parser.add_argument("--date", help="학습 시작일 (YYYY-MM-DD), 기본값: 오늘")
 
-    send_parser = subparsers.add_parser("send", help="오늘 차수의 주간 학습 내용을 텔레그램으로 전송")
+    send_parser = subparsers.add_parser("send", help="이번 주 에피소드를 텔레그램으로 한 번 알린다")
     send_parser.add_argument("--date", help="전송 기준일 (YYYY-MM-DD), 기본값: 오늘")
 
     args = parser.parse_args()
