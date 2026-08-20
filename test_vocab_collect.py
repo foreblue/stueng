@@ -1,0 +1,340 @@
+"""vocab 수집기·밴드 판정 테스트"""
+
+import datetime as dt
+import json
+import os
+import sys
+import tempfile
+from pathlib import Path
+
+sys.path.insert(0, os.path.dirname(__file__))
+
+from sqlalchemy import select
+
+from vocab import banding, collect
+from vocab.db import create_all, make_engine, session_factory
+from vocab.models import KIND_EXPRESSION, KIND_WORD, Occurrence, Word
+
+
+def _memory_session():
+    engine = make_engine("sqlite://")
+    create_all(engine)
+    return session_factory(engine)()
+
+
+# --------------------------------------------------------------------------
+# 밴드 판정
+# --------------------------------------------------------------------------
+
+
+def test_common_words_are_demoted():
+    """성인 학습자가 이미 알 단어는 known 밴드로 빠진다."""
+    for word in ("poverty", "economic", "impact", "exports"):
+        assert banding.band(word) == banding.BAND_KNOWN, word
+
+
+def test_useful_advanced_words_stay_core():
+    for word in ("jurisdiction", "sedentary", "capitulate", "monetary"):
+        assert banding.band(word) == banding.BAND_CORE, word
+
+
+def test_phrases_never_banded_by_frequency():
+    """다어절·하이픈 표현은 wordfreq 값이 무의미하므로 항상 core."""
+    for phrase in ("wait-and-see", "break the ice", "sitting is the new smoking"):
+        assert banding.zipf(phrase) is None, phrase
+        assert banding.band(phrase) == banding.BAND_CORE, phrase
+
+
+def test_lemma_and_surface_both_considered():
+    """굴절형과 원형 중 더 흔한 쪽을 쓴다. 한쪽만 보면 판정이 흔들린다."""
+    from wordfreq import zipf_frequency
+
+    assert banding.lemma("exports") == "export"
+    expected = max(zipf_frequency("exports", "en"), zipf_frequency("export", "en"))
+    assert banding.zipf("exports") == expected
+
+
+def test_normalize_strips_punctuation_and_case():
+    assert banding.normalize('  "Sedentary."  ') == "sedentary"
+    assert banding.normalize("Break  the\tice") == "break the ice"
+
+
+# --------------------------------------------------------------------------
+# 파서
+# --------------------------------------------------------------------------
+
+
+def test_parse_daily_reads_vocabulary_and_expressions():
+    payload = {
+        "date": "2026-06-01",
+        "source": "Up First",
+        "title": "Test Episode",
+        "episode_url": "https://example.com/ep",
+        "analysis": {
+            "vocabulary": [
+                {
+                    "word": "sedentary",
+                    "definition_kr": "앉아서 거의 움직이지 않는",
+                    "definition_en": "characterized by much sitting",
+                    "example": "the harms of our modern sedentary lifestyle",
+                }
+            ],
+            "expressions": [
+                {
+                    "expression": "sitting is the new smoking",
+                    "meaning_kr": "앉아 있는 것이 흡연만큼 해롭다",
+                    "usage_note": "'X is the new Y' 구조",
+                    "example": "Scientists say that sitting is the new smoking.",
+                }
+            ],
+            "key_sentences": [{"sentence": "무시되어야 한다", "translation_kr": "..."}],
+        },
+    }
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "2026-06-01.json"
+        path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+        entries = collect.parse_daily(path)
+
+    assert len(entries) == 2, f"key_sentences는 어휘가 아니므로 제외: {len(entries)}"
+    word, expression = entries
+    assert word.kind == KIND_WORD and word.headword == "sedentary"
+    assert word.sentence == "the harms of our modern sedentary lifestyle"
+    assert word.occurred_on == dt.date(2026, 6, 1)
+    assert expression.kind == KIND_EXPRESSION
+    assert expression.source_kind == "upfirst"
+
+
+def test_parse_daily_skips_failed_analysis():
+    """분석이 실패해 raw 폴백만 있는 파일은 건너뛴다."""
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "2026-06-02.json"
+        path.write_text(
+            json.dumps({"date": "2026-06-02", "source": "Up First", "title": "x",
+                        "analysis": {"raw": "파싱 실패한 응답"}}),
+            encoding="utf-8",
+        )
+        assert collect.parse_daily(path) == []
+
+
+def test_parse_weekly_maps_day_to_study_date():
+    payload = {
+        "start_date": "2026-06-01",
+        "study_dates": ["2026-06-01", "2026-06-02", "2026-06-03", "2026-06-04", "2026-06-05"],
+        "episode": {
+            "source": "Planet Money",
+            "title": "Korea Summer School",
+            "episode_url": "https://example.com/pm",
+        },
+        "weekly_analysis": {
+            "lessons": [
+                {"day": 1, "vocabulary": [], "expressions": []},
+                {
+                    "day": 3,
+                    "vocabulary": [
+                        {"word": "malinvestment", "definition_kr": "잘못된 투자", "example": "q"}
+                    ],
+                    "expressions": [],
+                },
+            ]
+        },
+    }
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "planetmoney-2026-06-01.json"
+        path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+        entries = collect.parse_weekly(path)
+
+    assert len(entries) == 1
+    assert entries[0].occurred_on == dt.date(2026, 6, 3), "day 3 → study_dates[2]"
+    assert entries[0].source_kind == "planetmoney"
+
+
+CLASS_NOTE = """# 영어수업 2026-08-20
+
+- 튜터: Sarah
+- 주제: 재택근무
+
+## 수업 요약
+
+오늘은 재택근무에 대해 이야기했다.
+
+## 내 표현 교정
+
+| 내가 한 말 | 자연스러운 표현 | 왜 |
+| --- | --- | --- |
+| I very like remote work | I really like remote work | very는 동사를 못 꾸민다 |
+
+## 새 단어·표현
+
+| 표현 | 뜻 | 예문 |
+| --- | --- | --- |
+| commute | 통근하다 | My commute takes an hour. |
+|  |  |  |
+
+## 복습 과제
+
+- [ ] 연습
+"""
+
+
+def test_parse_class_note_reads_both_tables():
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "영어수업 2026-08-20.md"
+        path.write_text(CLASS_NOTE, encoding="utf-8")
+        entries = collect.parse_class_note(path)
+
+    by_source = {e.source_kind: e for e in entries}
+    assert set(by_source) == {"correction", "class"}, f"{[e.source_kind for e in entries]}"
+
+    correction = by_source["correction"]
+    assert correction.headword == "i really like remote work"
+    assert "very는" in correction.meaning_kr
+    assert "I very like remote work" in correction.usage_note
+
+    vocab = by_source["class"]
+    assert vocab.headword == "commute"
+    assert vocab.sentence == "My commute takes an hour."
+    assert "Sarah" in vocab.source_title and "재택근무" in vocab.source_title
+
+
+def test_parse_class_note_ignores_empty_template_rows():
+    """템플릿이 남긴 빈 행이 어휘로 들어오면 안 된다."""
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "영어수업 2026-08-20.md"
+        path.write_text(CLASS_NOTE, encoding="utf-8")
+        entries = collect.parse_class_note(path)
+    assert all(e.display.strip() for e in entries)
+    assert len(entries) == 2
+
+
+# --------------------------------------------------------------------------
+# 저장 (멱등성·병합)
+# --------------------------------------------------------------------------
+
+
+def _entry(display, sentence, *, day="2026-06-01", kind=KIND_WORD, source="upfirst", **kw):
+    return collect.Entry(
+        display=display,
+        kind=kind,
+        meaning_kr=kw.pop("meaning_kr", "뜻"),
+        source_kind=source,
+        source_title=kw.pop("source_title", "제목"),
+        occurred_on=dt.date.fromisoformat(day),
+        sentence=sentence,
+        **kw,
+    )
+
+
+def test_same_word_from_two_sources_merges_into_one_row():
+    """같은 단어가 여러 에피소드에 나오면 한 줄에 예문이 쌓인다 — 문맥 순환의 전제."""
+    session = _memory_session()
+    stats = collect.Stats()
+    collect.upsert(session, _entry("Sedentary", "First context sentence."), stats)
+    collect.upsert(
+        session,
+        _entry("sedentary", "A different context entirely.", day="2026-07-01", source="planetmoney"),
+        stats,
+    )
+    session.commit()
+
+    words = session.scalars(select(Word)).all()
+    assert len(words) == 1, "표제어 정규화 후 같은 단어는 한 줄"
+    assert len(words[0].occurrences) == 2
+    assert stats.words_created == 1 and stats.occurrences_created == 2
+
+
+def test_duplicate_sentence_is_not_stored_twice():
+    session = _memory_session()
+    stats = collect.Stats()
+    collect.upsert(session, _entry("offset", "The SAME   sentence."), stats)
+    collect.upsert(session, _entry("offset", "the same sentence."), stats)
+    session.commit()
+
+    assert session.scalar(select(Occurrence).where(Occurrence.word_id == 1)) is not None
+    assert len(session.scalars(select(Occurrence)).all()) == 1, "공백·대소문자 차이는 같은 문장"
+    assert stats.occurrences_created == 1
+
+
+def test_first_seen_moves_earlier_when_older_file_arrives_later():
+    """파일을 순서 없이 읽어도 최초 등장일이 맞는다."""
+    session = _memory_session()
+    stats = collect.Stats()
+    collect.upsert(session, _entry("deficit", "later.", day="2026-07-01"), stats)
+    collect.upsert(session, _entry("deficit", "earlier.", day="2026-04-01"), stats)
+    session.commit()
+
+    word = session.scalar(select(Word))
+    assert word.first_seen == dt.date(2026, 4, 1)
+
+
+def test_existing_meaning_is_not_overwritten():
+    """먼저 들어온 뜻을 나중 소스가 덮어쓰지 않는다. 빈 칸만 채운다."""
+    session = _memory_session()
+    stats = collect.Stats()
+    collect.upsert(session, _entry("interim", "a.", meaning_kr="첫 번째 뜻"), stats)
+    collect.upsert(
+        session, _entry("interim", "b.", meaning_kr="두 번째 뜻", meaning_en="temporary"), stats
+    )
+    session.commit()
+
+    word = session.scalar(select(Word))
+    assert word.meaning_kr == "첫 번째 뜻"
+    assert word.meaning_en == "temporary", "비어 있던 칸은 채워져야 한다"
+
+
+def test_band_is_assigned_on_insert():
+    session = _memory_session()
+    stats = collect.Stats()
+    collect.upsert(session, _entry("poverty", "s."), stats)
+    collect.upsert(session, _entry("break the ice", "s.", kind=KIND_EXPRESSION), stats)
+    session.commit()
+
+    bands = {w.headword: (w.band, w.zipf) for w in session.scalars(select(Word)).all()}
+    assert bands["poverty"][0] == banding.BAND_KNOWN
+    assert bands["break the ice"] == (banding.BAND_CORE, None)
+
+
+def test_entry_without_sentence_still_creates_word():
+    """예문이 없어도 어휘는 만들어진다. 4지선다는 예문 없이도 낼 수 있다."""
+    session = _memory_session()
+    stats = collect.Stats()
+    collect.upsert(session, _entry("lobbying", None), stats)
+    session.commit()
+
+    word = session.scalar(select(Word))
+    assert word is not None and word.occurrences == []
+
+
+if __name__ == "__main__":
+    tests = [
+        test_common_words_are_demoted,
+        test_useful_advanced_words_stay_core,
+        test_phrases_never_banded_by_frequency,
+        test_lemma_and_surface_both_considered,
+        test_normalize_strips_punctuation_and_case,
+        test_parse_daily_reads_vocabulary_and_expressions,
+        test_parse_daily_skips_failed_analysis,
+        test_parse_weekly_maps_day_to_study_date,
+        test_parse_class_note_reads_both_tables,
+        test_parse_class_note_ignores_empty_template_rows,
+        test_same_word_from_two_sources_merges_into_one_row,
+        test_duplicate_sentence_is_not_stored_twice,
+        test_first_seen_moves_earlier_when_older_file_arrives_later,
+        test_existing_meaning_is_not_overwritten,
+        test_band_is_assigned_on_insert,
+        test_entry_without_sentence_still_creates_word,
+    ]
+    failed = 0
+    for test in tests:
+        try:
+            test()
+            print(f"PASS: {test.__name__}")
+        except AssertionError as e:
+            failed += 1
+            print(f"FAIL: {test.__name__} — {e}")
+        except Exception as e:
+            failed += 1
+            print(f"ERROR: {test.__name__} — {type(e).__name__}: {e}")
+
+    print(f"\n{'=' * 40}")
+    print(f"결과: {len(tests) - failed}/{len(tests)} 통과")
+    sys.exit(1 if failed else 0)

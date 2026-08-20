@@ -8,3 +8,4 @@ data/
 
 # 컴파일 산출물 (skills/english-class/scripts/AudioRecorder.swift 에서 빌드)
 skills/english-class/scripts/audio-recorder
+.venv/
