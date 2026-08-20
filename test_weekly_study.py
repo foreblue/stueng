@@ -48,61 +48,57 @@ def _plan(start="2026-06-04"):
     }
 
 
-def test_lesson_for_date_uses_start_date_offset():
+def test_first_study_date_skips_weekends():
+    """계획을 금요일에 세워도 첫 학습일은 평일 기준으로 잡힌다."""
     plan = _plan()
-    assert weekly_study._lesson_for_date(plan, date(2026, 6, 4))["day"] == 1
-    assert weekly_study._lesson_for_date(plan, date(2026, 6, 6)) is None
-    assert weekly_study._lesson_for_date(plan, date(2026, 6, 8))["day"] == 3
-    assert weekly_study._lesson_for_date(plan, date(2026, 6, 10))["day"] == 5
-    assert weekly_study._lesson_for_date(plan, date(2026, 6, 11)) is None
+    assert weekly_study._first_study_date(plan) == date(2026, 6, 4)
+
+    weekend_plan = dict(plan, start_date="2026-06-06")  # 토요일
+    assert weekly_study._first_study_date(weekend_plan) == date(2026, 6, 8)
 
 
-def test_send_marks_date_and_skips_duplicate():
+def test_episode_is_announced_once_on_the_first_study_day():
+    """어휘를 평일마다 흘려보내던 동작을 대체한다 — 이제 에피소드만 한 번 알린다."""
     with tempfile.TemporaryDirectory() as tmp:
         data_dir = Path(tmp)
         path = data_dir / "planetmoney-2026-06-04.json"
         path.write_text(json.dumps(_plan(), ensure_ascii=False), encoding="utf-8")
         sent = []
 
-        def fake_send(_episode, lesson, **_kwargs):
-            sent.append(lesson["day"])
+        def fake_send(episode, **_kwargs):
+            sent.append(episode.title)
             return True
 
         with (
             patch.object(weekly_study, "DATA_DIR", data_dir),
             patch.object(weekly_study.config, "validate", lambda: None),
-            patch.object(weekly_study.messenger, "send_weekly_lesson", fake_send),
+            patch.object(weekly_study.messenger, "send_episode", fake_send),
         ):
-            assert weekly_study.send(date(2026, 6, 5)) is True
-            assert weekly_study.send(date(2026, 6, 5)) is False
+            assert weekly_study.send(date(2026, 6, 4)) is True
+            assert weekly_study.send(date(2026, 6, 4)) is False, "같은 날 두 번 보내지 않는다"
 
-        updated = json.loads(path.read_text(encoding="utf-8"))
-        assert sent == [2]
-        assert updated["sent_dates"] == ["2026-06-05"]
+        assert len(sent) == 1
+        assert json.loads(path.read_text(encoding="utf-8"))["sent_dates"] == ["2026-06-04"]
 
 
-def test_send_uses_current_weekday_total_for_old_plan():
-    plan = _plan()
-    plan["study_days"] = 7
-
+def test_no_message_on_the_other_weekdays():
+    """예전에는 평일마다 Day N 을 보냈다. 지금은 첫날 말고는 조용하다."""
     with tempfile.TemporaryDirectory() as tmp:
         data_dir = Path(tmp)
         path = data_dir / "planetmoney-2026-06-04.json"
-        path.write_text(json.dumps(plan, ensure_ascii=False), encoding="utf-8")
-        totals = []
-
-        def fake_send(_episode, _lesson, **kwargs):
-            totals.append(kwargs["total_days"])
-            return True
+        path.write_text(json.dumps(_plan(), ensure_ascii=False), encoding="utf-8")
+        sent = []
 
         with (
             patch.object(weekly_study, "DATA_DIR", data_dir),
             patch.object(weekly_study.config, "validate", lambda: None),
-            patch.object(weekly_study.messenger, "send_weekly_lesson", fake_send),
+            patch.object(weekly_study.messenger, "send_episode",
+                         lambda episode, **_k: sent.append(episode.title) or True),
         ):
-            assert weekly_study.send(date(2026, 6, 10)) is True
+            for day in (5, 8, 9, 10):
+                assert weekly_study.send(date(2026, 6, day)) is False, day
 
-        assert totals == [5]
+        assert sent == []
 
 
 def test_prepare_saves_weekly_plan():
@@ -152,9 +148,9 @@ def test_weekly_plan_validation_rejects_incomplete_days():
 
 if __name__ == "__main__":
     tests = [
-        test_lesson_for_date_uses_start_date_offset,
-        test_send_marks_date_and_skips_duplicate,
-        test_send_uses_current_weekday_total_for_old_plan,
+        test_first_study_date_skips_weekends,
+        test_episode_is_announced_once_on_the_first_study_day,
+        test_no_message_on_the_other_weekdays,
         test_prepare_saves_weekly_plan,
         test_weekly_plan_validation_rejects_incomplete_days,
     ]
