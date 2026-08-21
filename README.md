@@ -29,6 +29,11 @@ vocab.tutor      ←──────────────────    /a
 messenger.py     텔레그램 알림    ←──   /api/progress
 ```
 
+**텔레그램은 두 가지를 보낸다.** 팟캐스트 어휘(`main.py`, `weekly_study.py send`)는
+예전 그대로 아침에 간다 — 매일 읽는 습관이 이미 붙어 있고, 웹앱이 그것을 대체하는
+것이 아니라 옆에 붙는 것이다. 여기에 복습 알림(`vocab.sync notify`)이 하나 더 붙는데,
+이쪽은 단어를 싣지 않고 개수와 링크만 보내 앱을 열게 만든다.
+
 **서버는 복습만 한다.** 팟캐스트를 받아오는 일도, LLM 을 부르는 일도 하지 않는다.
 분석에 쓰는 프록시는 이 맥북에만 있고 수업 녹음은 ScreenCaptureKit 기반이라 옮길 수
 없다. 그 제약을 우회하는 대신 받아들였다 — 덕분에 API 비용이 0원이고 서버가 가볍다.
@@ -100,12 +105,13 @@ python -m vocab.sync push
 로컬 crontab. 시각은 취향대로.
 
 ```cron
-# 아침 6시 — Up First 분석 + 에피소드 알림
-0 6 * * *  cd ~/workspace/stueng && .venv/bin/python main.py >> logs/daily.log 2>&1
+# 아침 7시 — Up First 분석 + 어휘 전송
+0 7 * * *  cd ~/workspace/stueng && .venv/bin/python main.py >> logs/daily.log 2>&1
 
-# 월요일 6시 반 — Planet Money 주간 어휘 준비 + 에피소드 알림
-30 6 * * 1 cd ~/workspace/stueng && .venv/bin/python weekly_study.py prepare >> logs/weekly.log 2>&1
-35 6 * * 1 cd ~/workspace/stueng && .venv/bin/python weekly_study.py send    >> logs/weekly.log 2>&1
+# 목요일 4시 반 — Planet Money 주간 학습 계획 생성
+30 4 * * 4 cd ~/workspace/stueng && .venv/bin/python weekly_study.py prepare >> logs/weekly.log 2>&1
+# 평일 7시 — 그날 차수의 단어·표현 전송
+0 7 * * 1-5 cd ~/workspace/stueng && .venv/bin/python weekly_study.py send   >> logs/weekly.log 2>&1
 
 # 7시 — 어휘를 서버로 밀고 복습 알림
 0 7 * * *  cd ~/workspace/stueng && .venv/bin/python -m vocab.sync push   >> logs/sync.log 2>&1
