@@ -18,46 +18,155 @@ def _e(text: str) -> str:
     return html.escape(str(text))
 
 
-def _format_episode(episode: Episode, *, app_url: str = "") -> str:
-    """에피소드 소개.
+def _format_analysis(episode: Episode, analysis: dict, fail_reason: str = "") -> str:
+    # raw fallback
+    if "raw" in analysis:
+        duration_min = episode.duration_sec // 60
+        return (
+            f"📰 <b>{_e(episode.title)}</b> (~{duration_min}min)\n"
+            f"🎧 <a href=\"{_e(episode.audio_url)}\">오디오 듣기</a>  "
+            f"📄 <a href=\"{_e(episode.episode_url)}\">원문 보기</a>\n\n"
+            f"{_e(analysis['raw'])}"
+        )
 
-    어휘는 더 이상 여기에 싣지 않는다. 읽기만 하는 노출은 학습이 되지 않는다는 것이
-    이 프로젝트가 조사에서 얻은 결론이고(Karpicke & Roediger 2008), 어휘를 꺼내는 일은
-    복습 웹앱이 맡는다. 이 메시지의 목적은 하나다 — 오늘 팟캐스트를 실제로 듣게 하는 것.
-    """
+    lines = []
     duration_min = episode.duration_sec // 60
-    listen_url = episode.podcast_url or episode.episode_url or episode.audio_url
 
-    lines = [
-        f"🎧 <b>{_e(episode.source_name)}</b> · {date.today():%Y-%m-%d}",
-        "",
-        f"<b>{_e(episode.title)}</b> (~{duration_min}분)",
-        (
-            f"<a href=\"{_e(listen_url)}\">오디오 듣기</a>  "
-            f"<a href=\"{_e(episode.episode_url)}\">원문 보기</a>"
-        ),
-    ]
-    if app_url:
-        lines += ["", f"📇 <a href=\"{_e(app_url)}\">오늘의 단어 복습하기</a>"]
+    # 헤더
+    lines.append(f"📰 <b>{_e(episode.source_name)}: {_e(episode.title)}</b> (~{duration_min}min)")
+    lines.append(
+        f"🎧 <a href=\"{_e(episode.audio_url)}\">오디오 듣기</a>  "
+        f"🎙️ <a href=\"https://podcasts.apple.com/podcast/id510318\">Podcasts 앱</a>  "
+        f"📄 <a href=\"{_e(episode.episode_url)}\">원문 보기</a>"
+    )
+
+    # 어휘
+    vocabulary = analysis.get("vocabulary", [])
+    if vocabulary:
+        lines.append("")
+        lines.append("📚 <b>어휘 (Vocabulary)</b>")
+        for item in vocabulary:
+            word = _e(item.get("word", ""))
+            def_kr = _e(item.get("definition_kr") or item.get("korean_definition", ""))
+            def_en = _e(item.get("definition_en", ""))
+            example = _e(item.get("example") or item.get("example_sentence", ""))
+            lines.append("")
+            lines.append(f"• <b>{word}</b> — {def_kr}")
+            lines.append(f"  <i>{def_en}</i>")
+            if example:
+                lines.append(f"  예문: \"{example}\"")
+
+    # 표현
+    expressions = analysis.get("expressions", [])
+    if expressions:
+        lines.append("")
+        lines.append("💬 <b>표현 (Expressions)</b>")
+        for item in expressions:
+            expr = _e(item.get("expression") or item.get("phrase", ""))
+            meaning = _e(item.get("meaning_kr") or item.get("korean_meaning", ""))
+            usage = _e(item.get("usage_note", ""))
+            example = _e(item.get("example", ""))
+            lines.append("")
+            lines.append(f"• <b>{expr}</b>")
+            lines.append(f"  뜻: {meaning}")
+            if usage:
+                lines.append(f"  사용법: {usage}")
+            if example:
+                lines.append(f"  예문: \"{example}\"")
+
+    # 핵심 문장
+    key_sentences = analysis.get("key_sentences", [])
+    if key_sentences:
+        lines.append("")
+        lines.append("📝 <b>핵심 문장 (Key Sentences)</b>")
+        for i, item in enumerate(key_sentences, 1):
+            sentence = _e(item.get("sentence", ""))
+            translation = _e(item.get("translation_kr", ""))
+            explanation = _e(item.get("explanation_kr", ""))
+            lines.append("")
+            lines.append(f"{i}. \"{sentence}\"")
+            if translation:
+                lines.append("")
+                lines.append(f"   번역: {translation}")
+            if explanation:
+                lines.append("")
+                lines.append(f"   → {explanation}")
+
+    # 분석 실패 사유
+    if fail_reason:
+        lines.append("")
+        lines.append("⚠️ <b>AI 분석 실패</b>")
+        lines.append(f"<pre>{_e(fail_reason)}</pre>")
+
     return "\n".join(lines)
 
 
-def _format_due(due: int, new_available: int, unresolved: int, app_url: str) -> str:
-    """복습 알림. 문제를 여기서 풀게 하지 않고 앱을 열게 만든다."""
-    total = due + unresolved
-    if not total and not new_available:
-        return ""
+def _format_weekly_lesson(
+    episode: Episode,
+    lesson: dict,
+    *,
+    run_date: date,
+    start_date: date,
+    total_days: int,
+) -> str:
+    study_day = 0
+    current = start_date
+    while current <= run_date:
+        if current.weekday() < 5:
+            study_day += 1
+        current = date.fromordinal(current.toordinal() + 1)
 
-    bits = []
-    if total:
-        bits.append(f"복습 {total}장")
-    if new_available:
-        bits.append(f"새 단어 {new_available}개")
+    day = study_day or int(lesson.get("day") or 1)
+    duration_min = episode.duration_sec // 60
+    listen_url = episode.podcast_url or episode.episode_url or episode.audio_url
+    podcast_app_url = episode.podcast_url or "https://podcasts.apple.com/podcast/id290783428"
 
-    lines = [f"📇 <b>오늘의 단어</b> — {' · '.join(bits)}"]
-    if unresolved:
-        lines.append(f"어제 못 맞힌 카드 {unresolved}장이 남아 있습니다.")
-    lines += ["", f"<a href=\"{_e(app_url)}\">복습하러 가기</a>"]
+    lines = [
+        f"🌍 <b>Planet Money 영어 공부 — {run_date:%Y-%m-%d}</b>",
+        f"<b>Day {day}/{total_days}</b>",
+        "",
+        f"📰 <b>{_e(episode.title)}</b> (~{duration_min}min)",
+        (
+            f"🎧 <a href=\"{_e(listen_url)}\">오디오 듣기</a>  "
+            f"🎙️ <a href=\"{_e(podcast_app_url)}\">Podcasts 앱</a>  "
+            f"📄 <a href=\"{_e(episode.episode_url)}\">원문 보기</a>"
+        ),
+    ]
+
+    vocabulary = lesson.get("vocabulary", [])
+    if vocabulary:
+        lines.append("")
+        lines.append("📚 <b>오늘의 주요 단어 3개</b>")
+        for item in vocabulary:
+            word = _e(item.get("word", ""))
+            def_kr = _e(item.get("definition_kr") or item.get("korean_definition", ""))
+            def_en = _e(item.get("definition_en", ""))
+            example = _e(item.get("example") or item.get("example_sentence", ""))
+            lines.append("")
+            lines.append(f"• <b>{word}</b> — {def_kr}")
+            if def_en:
+                lines.append(f"  <i>{def_en}</i>")
+            if example:
+                lines.append(f"  예문: \"{example}\"")
+
+    expressions = lesson.get("expressions", [])
+    if expressions:
+        lines.append("")
+        lines.append("💬 <b>오늘의 주요 표현 3개</b>")
+        for item in expressions:
+            expr = _e(item.get("expression") or item.get("phrase", ""))
+            meaning = _e(item.get("meaning_kr") or item.get("korean_meaning", ""))
+            usage = _e(item.get("usage_note", ""))
+            example = _e(item.get("example", ""))
+            lines.append("")
+            lines.append(f"• <b>{expr}</b>")
+            if meaning:
+                lines.append(f"  뜻: {meaning}")
+            if usage:
+                lines.append(f"  사용법: {usage}")
+            if example:
+                lines.append(f"  예문: \"{example}\"")
+
     return "\n".join(lines)
 
 
@@ -98,17 +207,62 @@ def _send_message(text: str) -> bool:
     return False
 
 
-def send_episode(episode: Episode, *, app_url: str = "", fail_reason: str = "") -> bool:
-    """오늘의 에피소드를 알린다. 어휘는 웹앱에서 푼다."""
-    text = _format_episode(episode, app_url=app_url)
-    if fail_reason:
-        text += f"\n\n⚠️ <b>AI 분석 실패</b>\n<pre>{_e(fail_reason)}</pre>"
+def send(episode: Episode, analysis: dict, *, fail_reason: str = "") -> None:
+    today = date.today().strftime("%Y-%m-%d")
+    header = f"🌅 <b>오늘의 영어 공부 — {today}</b>"
+    body = _format_analysis(episode, analysis, fail_reason=fail_reason)
+    full_message = f"{header}\n\n{body}"
+
+    parts = _split_message(full_message)
+    for part in parts:
+        _send_message(part)
+        time.sleep(0.5)
+
+
+def send_weekly_lesson(
+    episode: Episode,
+    lesson: dict,
+    *,
+    run_date: date,
+    start_date: date,
+    total_days: int,
+) -> bool:
+    text = _format_weekly_lesson(
+        episode,
+        lesson,
+        run_date=run_date,
+        start_date=start_date,
+        total_days=total_days,
+    )
 
     ok = True
     for part in _split_message(text):
         ok = _send_message(part) and ok
         time.sleep(0.5)
     return ok
+
+
+def _format_due(due: int, new_available: int, unresolved: int, app_url: str) -> str:
+    """복습 웹앱 알림.
+
+    팟캐스트 메시지와 목적이 다르다. 저쪽은 오늘 들을 것을 알리고, 이쪽은 이미 만난
+    단어를 꺼내러 가게 만든다. 그래서 단어를 본문에 싣지 않고 개수와 링크만 보낸다.
+    """
+    total = due + unresolved
+    if not total and not new_available:
+        return ""
+
+    bits = []
+    if total:
+        bits.append(f"복습 {total}장")
+    if new_available:
+        bits.append(f"새 단어 {new_available}개")
+
+    lines = [f"📇 <b>오늘의 단어</b> — {' · '.join(bits)}"]
+    if unresolved:
+        lines.append(f"어제 못 맞힌 카드 {unresolved}장이 남아 있습니다.")
+    lines += ["", f"<a href=\"{_e(app_url)}\">복습하러 가기</a>"]
+    return "\n".join(lines)
 
 
 def send_due(due: int, new_available: int, unresolved: int, app_url: str) -> bool:
