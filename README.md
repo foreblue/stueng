@@ -69,36 +69,48 @@ VOCAB_PASSWORD=dev VOCAB_INGEST_TOKEN=dev \
 
 ## 배포
 
-`flyctl` 과 Neon 계정이 필요하다. 처음 한 번만.
+`~/workspace/deepheart-gw` 게이트웨이(Traefik)에 컨테이너로 붙는다.
+주소는 https://stueng.deepheart.duckdns.org 이고 인증서는 Let's Encrypt DNS-01 로
+자동 발급된다.
 
 ```bash
-# 1) Postgres — neon.tech 에서 프로젝트를 만들고 연결 문자열을 복사한다.
-#    Fly Postgres 대신 Neon 을 쓰는 이유: 복습 기록은 로컬에 원본이 없는 유일한
-#    데이터라 관리형 백업이 있는 쪽이 맞다.
-
-# 2) 앱 생성 (fly.toml 의 app 이름이 바뀐다)
-fly launch --no-deploy
-
-# 3) 비밀값
-fly secrets set \
-  VOCAB_DB_URL="postgresql://...neon.tech/vocab?sslmode=require" \
-  VOCAB_PASSWORD="$(openssl rand -base64 24)" \
-  VOCAB_SECRET_KEY="$(openssl rand -base64 32)" \
-  VOCAB_INGEST_TOKEN="$(openssl rand -hex 32)"
-
-# 4) 배포
-fly deploy
-
-# 5) 어휘를 밀어 올린다
-export VOCAB_SERVER_URL=https://<앱이름>.fly.dev
-export VOCAB_INGEST_TOKEN=<위에서 만든 값>
-python -m vocab.sync push
+cd ~/workspace/deepheart-gw
+docker compose build stueng
+docker compose up -d stueng
+docker logs -f stueng
 ```
 
-`VOCAB_SECRET_KEY` 를 빼먹으면 프로덕션에서 기동이 거부된다 — 없으면 재시작마다
-로그아웃되고, 출제 토큰 서명도 매번 무효가 된다.
+게이트웨이 `.env` 에 세 값이 있어야 한다. `VOCAB_INGEST_TOKEN` 은 이 저장소의
+`.env` 와 **같은 값**이어야 로컬에서 어휘를 밀어 올릴 수 있다.
 
-폰에서는 사파리로 열어 "홈 화면에 추가" 하면 PWA 로 설치된다.
+```
+VOCAB_PASSWORD=...
+VOCAB_SECRET_KEY=...
+VOCAB_INGEST_TOKEN=...   # stueng/.env 와 동일
+```
+
+### 루프백 포트 8010
+
+컨테이너는 Traefik 뒤에 있으면서 `127.0.0.1:8010` 에도 묶여 있다. 공유기가 헤어핀
+NAT 을 지원하지 않아 **내부에서 공인 주소로 되돌아오지 못하기 때문**이다. 이 맥북에서
+도는 것들(`vocab.sync push`, `vocab.tutor`, `vocab.optimize`)은 이 포트를 쓴다.
+LAN 에는 열려 있지 않다 — 루프백 전용이다.
+
+같은 이유로 텔레그램 알림의 링크(`VOCAB_APP_URL`)는 집 안 와이파이에서는 열리지 않을
+수 있다. 셀룰러로는 정상이다.
+
+### 데이터
+
+복습 기록은 `stueng-data` 도커 볼륨의 SQLite 에 있다. 어휘는 로컬에서 다시 만들 수
+있지만 이건 여기밖에 없으므로 가끔 받아 둔다.
+
+```bash
+curl -H "X-Ingest-Token: $VOCAB_INGEST_TOKEN" \
+  http://127.0.0.1:8010/api/export > backup-$(date +%Y%m%d).json
+```
+
+Postgres 로 옮기려면 `requirements-app.txt` 의 `psycopg[binary]` 주석을 풀고
+`VOCAB_DB_URL` 만 바꾸면 된다. 스키마는 동일하다.
 
 ## cron
 

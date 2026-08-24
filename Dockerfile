@@ -15,5 +15,9 @@ RUN python -c "from wordfreq import zipf_frequency; zipf_frequency('test', 'en')
 
 COPY vocab/ ./vocab/
 
+# 복습 기록이 사는 곳. 어휘는 로컬에서 다시 만들 수 있지만 이건 여기밖에 없다.
+VOLUME ["/data"]
+ENV VOCAB_DB_URL=sqlite:////data/vocab.db
+
 EXPOSE 8080
 CMD ["uvicorn", "vocab.app.main:app", "--host", "0.0.0.0", "--port", "8080", "--workers", "1"]

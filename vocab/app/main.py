@@ -37,7 +37,8 @@ BASE_DIR = Path(__file__).resolve().parent
 
 #: 로그인 없이 열리는 경로. 나머지는 전부 막는다.
 PUBLIC_PATHS = {"/login", "/healthz", "/manifest.webmanifest", "/sw.js", "/ingest",
-                "/api/progress", "/api/export", "/api/tasks"}
+                "/api/progress", "/api/export", "/api/tasks",
+                "/api/handled"}
 
 engine = make_engine()
 Session_ = session_factory(engine)
@@ -583,6 +584,24 @@ def api_tasks_result(request: Request, session: DB, payload: TaskResultIn):
 
     session.commit()
     return applied
+
+
+@app.get("/api/handled")
+def api_handled(request: Request, session: DB):
+    """이미 학습 중이거나 안다고 표시한 표제어.
+
+    로컬 파이프라인이 새 어휘 후보를 고를 때 뺄 목록이다. 카드가 서버로 옮겨간 뒤로
+    로컬만 보고는 알 수 없게 됐다.
+    """
+    security.require_ingest_token(request)
+    rows = session.execute(
+        select(Word.headword).where(
+            Word.known.is_(True)
+            | Word.band.in_((banding.BAND_KNOWN, banding.BAND_RARE))
+            | Word.id.in_(select(Card.word_id))
+        )
+    ).all()
+    return {"headwords": [row[0] for row in rows]}
 
 
 @app.get("/api/export")

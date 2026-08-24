@@ -1,12 +1,12 @@
-# 서버(Fly.io)에서만 필요한 것. 로컬 파이프라인 의존성(feedparser, beautifulsoup4 등)은
-# 서버에 올리지 않는다 — 팟캐스트를 받아오는 일은 계속 맥북이 한다.
+# 컨테이너에서만 필요한 것. 로컬 파이프라인 의존성(feedparser, beautifulsoup4 등)은
+# 이미지에 올리지 않는다 — 팟캐스트를 받아오는 일은 계속 맥북이 한다.
 fastapi
 uvicorn[standard]
 jinja2
 itsdangerous
 python-multipart
 sqlalchemy>=2.0
-psycopg[binary]
+# Postgres 로 옮길 때 주석 해제: psycopg[binary]
 fsrs
 wordfreq
 simplemma
