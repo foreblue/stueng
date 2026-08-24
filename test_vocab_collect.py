@@ -114,22 +114,48 @@ def test_exclude_set_is_honoured():
     assert "monetary" not in trimmed, "대소문자 무관하게 빠져야 한다"
 
 
-def test_repetition_breaks_ties_between_similarly_common_words():
-    """반복은 순위를 뒤집는 힘이 아니라 비슷한 것들 사이의 타이브레이크다.
+def test_repetition_decides_the_order():
+    """밴드 안에서는 이 에피소드가 무엇에 관한 것인가가 정한다.
 
-    활용도(zipf)가 먼저다 — 고빈도 단어에서 학습 격차가 가장 크게 벌어진다는 결과에
-    맞춘 것이다. interim 과 portal 은 zipf 가 같으므로 반복 횟수가 순서를 정한다.
+    밴드가 이미 "배울 값이 있는가" 를 판정했다. 그 안에서까지 빈도로 줄을 세우면
+    밴드가 잘라낸 4.2 라는 면에 다시 달라붙어, 정작 배울 단어가 뒤로 밀린다.
     """
-    text = "The portal opened. " * 4 + "An interim report followed."
+    text = ("The adversary appeared. The adversary again. Adversary once more. "
+            "The adversary returns. " * 2 + "A single mention of jurisdiction.")
     picked = candidates.from_transcript(text, limit=10)
-    assert picked.index("portal") < picked.index("interim")
+    assert picked.index("adversary") < picked.index("jurisdiction"), picked
 
 
-def test_utility_outranks_repetition():
-    """훨씬 흔한 단어는 반복 몇 번으로 밀리지 않는다."""
-    text = "The stalemate continues. " * 5 + "There was one mention of jurisdiction."
+def test_ties_are_broken_by_rarity():
+    """같은 횟수면 덜 흔한 쪽이 배울 값이 크다."""
+    text = "The portal opened. An interim report followed."
     picked = candidates.from_transcript(text, limit=10)
-    assert picked.index("jurisdiction") < picked.index("stalemate")
+    assert banding.zipf("interim") <= banding.zipf("portal")
+    assert picked.index("interim") <= picked.index("portal"), picked
+
+
+def test_repetition_cannot_smuggle_in_a_known_word():
+    """반복이 순서를 정하되 밴드를 뚫지는 못한다."""
+    text = "The poverty rate. " * 20 + "One mention of jurisdiction."
+    picked = candidates.from_transcript(text, limit=10)
+    assert banding.band("poverty") == banding.BAND_KNOWN
+    assert "poverty" not in picked
+    assert "jurisdiction" in picked
+
+
+def test_top_of_the_list_is_not_pinned_to_the_band_ceiling():
+    """정렬을 빈도 내림차순으로 두면 상위가 전부 밴드 천장(4.0~4.2)에 몰린다.
+
+    실제 Up First 전사문에서 후보 112개 중 상위 12개가 전부 그랬다.
+    """
+    text = (
+        "The lawsuit continues. The critic responded. An ally spoke. "
+        "The adversary intensified. The adversary again. Adversary once more. "
+        "They disarm and disarm and disarm the stockpile. "
+    ) * 3
+    picked = candidates.from_transcript(text, limit=6)
+    zs = [banding.zipf(w) for w in picked if banding.zipf(w)]
+    assert min(zs) < 3.5, f"알짜가 하나도 안 올라왔다: {list(zip(picked, zs))}"
 
 
 def test_empty_transcript_yields_nothing():
@@ -534,8 +560,10 @@ if __name__ == "__main__":
         test_proper_nouns_are_excluded,
         test_only_core_band_words_become_candidates,
         test_exclude_set_is_honoured,
-        test_repetition_breaks_ties_between_similarly_common_words,
-        test_utility_outranks_repetition,
+        test_repetition_decides_the_order,
+        test_ties_are_broken_by_rarity,
+        test_repetition_cannot_smuggle_in_a_known_word,
+        test_top_of_the_list_is_not_pinned_to_the_band_ceiling,
         test_empty_transcript_yields_nothing,
         test_exclusion_matches_inflected_headwords,
         test_exclusion_matches_regardless_of_case_and_spacing,

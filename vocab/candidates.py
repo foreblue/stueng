@@ -11,14 +11,25 @@ private, economic, impact, demand, nuclear 였다 — 성인 학습자가 이미
            · core 밴드 (zipf 4.2 미만 = 이미 알 확률이 낮고, 2.0 이상 = 조어가 아님)
            · 고유명사가 아님
            · 이미 학습 중이거나 안다고 표시한 것이 아님
-    순위 = 활용도(zipf) 우선. Karatas et al. (2025) 에서 격차가 가장 크게 벌어진 것도
-           고빈도 단어였다. 여기에 전사문 안 반복 횟수를 약하게 얹는다.
+    순위 = 전사문 안에서 몇 번 반복됐는가. 동률이면 희귀한 쪽.
+
+밴드가 이미 "배울 값이 있는가" 를 판정한다. 그 안에서까지 빈도로 줄을 세우면 밴드가
+잘라낸 4.2 라는 면에 다시 달라붙는다 — 실제로 112개 후보 중 상위 12개가 전부
+zipf 4.0~4.19 로 나왔고, adversary·intensify·infiltrate·disarm·wield 같은 알짜는
+13위 밖으로 밀려 LLM 에게 가지도 못했다.
+
+밴드 안에서는 **이 에피소드가 무엇에 관한 것인가** 가 결정해야 한다. 반복된 낱말이
+그 에피소드의 주제어다. 부수 효과도 좋다 — 반복된 낱말은 예문이 여러 개 딸려오므로
+문맥을 돌려 쓸 수 있는 카드가 된다. ceasefire 가 예문 12개를 갖게 된 것이 그 원리다.
+
+(예전 주석은 Karatas et al. (2025) 를 근거로 들었는데 잘못 가져다 썼다. 그 결과는
+고빈도 단어가 *최적화된 스케줄로 학습했을 때* 더 크게 향상됐다는 것이지, 무엇을
+고를지에 대한 근거가 아니다.)
 """
 
 from __future__ import annotations
 
 import logging
-import math
 import re
 from collections import Counter
 
@@ -30,9 +41,6 @@ TOKEN_RE = re.compile(r"[A-Za-z]+(?:['’][A-Za-z]+)?")
 
 #: 세 글자 이하는 기능어이거나 약어다.
 MIN_LENGTH = 4
-
-#: 전사문 안 반복 횟수가 순위에 기여하는 정도. 활용도(zipf)를 뒤집지 않을 만큼만.
-REPEAT_WEIGHT = 0.3
 
 #: 팟캐스트 정형구. 광고 낭독·제작진 크레딧·구독 안내에서 나오는 말이라 에피소드
 #: 내용과 무관하고, 빈도만 보면 core 밴드에 들어와 매번 후보 위쪽을 차지한다.
@@ -93,17 +101,18 @@ def from_transcript(
     # 'Emirates' 를 걸러 놓고도 원형 'emirate' 가 후보로 올라온다.
     proper = {_key(word) for word in _proper_nouns(transcript)}
 
-    scored: list[tuple[float, str]] = []
+    scored: list[tuple[int, float, str]] = []
     for word, count in counts(transcript).items():
         if word in skip or word in proper:
             continue
         zipf = banding.zipf(word)
         if zipf is None or not (banding.RARE_MAX <= zipf < banding.KNOWN_MIN):
             continue
-        scored.append((zipf + REPEAT_WEIGHT * math.log(count + 1), word))
+        scored.append((count, zipf, word))
 
-    scored.sort(key=lambda pair: (-pair[0], pair[1]))
-    return [word for _, word in scored[:limit]]
+    # 많이 나온 것 먼저, 같은 횟수면 희귀한 쪽 먼저.
+    scored.sort(key=lambda row: (-row[0], row[1], row[2]))
+    return [word for _, _, word in scored[:limit]]
 
 
 def _handled_from_server() -> set[str] | None:
