@@ -17,11 +17,14 @@ private, economic, impact, demand, nuclear 였다 — 성인 학습자가 이미
 
 from __future__ import annotations
 
+import logging
 import math
 import re
 from collections import Counter
 
 from . import banding
+
+logger = logging.getLogger(__name__)
 
 TOKEN_RE = re.compile(r"[A-Za-z]+(?:['’][A-Za-z]+)?")
 
@@ -40,6 +43,12 @@ edit edited editor engineer engineering intern fact-check checked
 npr spotify apple support supporter donate membership member
 transcript audio download stream streaming
 """.split())
+
+
+def _key(text: str) -> str:
+    """비교용 키. 후보 집계와 같은 규칙(원형)으로 맞춘다."""
+    text = banding.normalize(text)
+    return text if banding.is_phrase(text) else banding.lemma(text)
 
 
 def _proper_nouns(text: str) -> set[str]:
@@ -76,7 +85,10 @@ def from_transcript(
     if not transcript:
         return []
 
-    skip = {word.lower() for word in exclude} | BOILERPLATE
+    # 후보는 원형(lemma)을 키로 센다. 제외 목록은 저장소의 표면형이라 그대로 비교하면
+    # 'accusations' 를 이미 외우는 중인데 'accusation' 이 새 후보로 다시 올라온다.
+    # 실제로 표제어 268개 중 60개가 원형과 다르다.
+    skip = {_key(word) for word in exclude} | {_key(word) for word in BOILERPLATE}
     proper = _proper_nouns(transcript)
 
     scored: list[tuple[float, str]] = []
@@ -93,22 +105,49 @@ def from_transcript(
 
 
 def _handled_from_server() -> set[str] | None:
-    """서버가 아는 "이미 다루는 표제어". 못 물어보면 None."""
-    import config
-    import requests
+    """서버가 아는 "이미 다루는 표제어". 못 물어보면 None.
+
+    실패는 조용히 넘기지 않고 반드시 남긴다. 게이트웨이와 이 저장소의
+    `VOCAB_INGEST_TOKEN` 은 서로 다른 파일에 있어서 어긋나기 쉬운데, 그러면 매일
+    아침 401 을 받고 로컬로 물러난 채 이미 외우는 단어를 다시 후보로 올리게 된다.
+    로그가 없으면 그 상태가 몇 주씩 이어져도 알 길이 없다.
+    """
+    try:
+        import requests
+
+        import config
+    except ImportError as e:
+        # 컨테이너에는 config 도 requests 도 없다. 서버 쪽에서 부를 일은 없지만,
+        # 부르더라도 파이프라인이 죽는 대신 로컬로 물러나야 한다.
+        logger.debug("서버 조회에 필요한 모듈 없음: %s", e)
+        return None
 
     if not config.VOCAB_SERVER_URL or not config.VOCAB_INGEST_TOKEN:
+        logger.info("VOCAB_SERVER_URL/TOKEN 이 없어 로컬 저장소로 후보를 거릅니다")
         return None
+
     try:
         response = requests.get(
             f"{config.VOCAB_SERVER_URL}/api/handled",
             headers={"X-Ingest-Token": config.VOCAB_INGEST_TOKEN},
             timeout=10,
         )
-        if not response.ok:
-            return None
-        return {w.lower() for w in response.json()["headwords"]}
-    except Exception:
+    except Exception as e:
+        logger.warning("서버에서 학습 상태를 못 받아 로컬로 물러납니다: %s", e)
+        return None
+
+    if not response.ok:
+        logger.warning(
+            "서버가 학습 상태를 거부했습니다 (%s): %s — 로컬로 물러납니다. "
+            "게이트웨이와 이 저장소의 VOCAB_INGEST_TOKEN 이 같은지 확인하세요.",
+            response.status_code, response.text[:120],
+        )
+        return None
+
+    try:
+        return {word.lower() for word in response.json()["headwords"]}
+    except (ValueError, KeyError, TypeError) as e:
+        logger.warning("서버 응답을 해석하지 못했습니다 (%s) — 로컬로 물러납니다", e)
         return None
 
 

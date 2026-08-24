@@ -14,6 +14,7 @@ from sqlalchemy import select
 from unittest.mock import patch
 
 import config
+import requests
 
 from vocab import banding, candidates, collect
 from vocab.db import create_all, make_engine, session_factory
@@ -124,6 +125,59 @@ def test_empty_transcript_yields_nothing():
     assert candidates.from_transcript("") == []
 
 
+def test_exclusion_matches_inflected_headwords():
+    """저장소는 표면형('accusations')을, 후보는 원형('accusation')을 쓴다.
+
+    맞춰 주지 않으면 이미 외우는 중인 단어가 매번 새 후보로 다시 올라온다.
+    실제 저장소의 단일어 표제어 268개 중 60개가 원형과 달랐다.
+    """
+    text = "The accusations continue. Both sides traded accusations again. " * 4
+    assert "accusation" in candidates.from_transcript(text, limit=10)
+    assert candidates.from_transcript(text, limit=10, exclude={"accusations"}) == []
+
+
+def test_exclusion_matches_regardless_of_case_and_spacing():
+    text = "The accusations continue. Both sides traded accusations again. " * 4
+    assert candidates.from_transcript(text, limit=10, exclude={"  Accusations. "}) == []
+
+
+def test_server_failure_is_logged_not_swallowed():
+    """조용히 물러나면 토큰이 어긋난 채 몇 주가 지나도 알 수 없다."""
+    import logging
+
+    class Bad:
+        ok = False
+        status_code = 401
+        text = "토큰 불일치"
+
+    records = []
+    handler = logging.Handler()
+    handler.emit = records.append
+    logger = candidates.logger
+    logger.addHandler(handler)
+    try:
+        with configured(), patch.object(requests, "get", return_value=Bad()):
+            assert candidates._handled_from_server() is None
+    finally:
+        logger.removeHandler(handler)
+
+    assert any("401" in r.getMessage() for r in records), "상태 코드가 로그에 남아야 한다"
+    assert any("VOCAB_INGEST_TOKEN" in r.getMessage() for r in records), "무엇을 고칠지 알려야 한다"
+
+
+def test_network_error_falls_back_quietly_but_logs():
+    records = []
+    import logging
+    handler = logging.Handler(); handler.emit = records.append
+    candidates.logger.addHandler(handler)
+    try:
+        with configured(), patch.object(requests, "get", side_effect=OSError("연결 실패")):
+            assert candidates._handled_from_server() is None
+    finally:
+        candidates.logger.removeHandler(handler)
+    assert records, "네트워크 실패도 로그로 남아야 한다"
+
+
 def test_already_handled_prefers_the_server():
     """학습 상태는 서버가 원본이다. 로컬 Card 는 배포 후 비어 있다."""
     with patch.object(candidates, "_handled_from_server", return_value={"poverty"}), \
@@ -141,6 +195,14 @@ def test_already_handled_falls_back_when_the_server_is_down():
 def test_server_lookup_is_skipped_without_configuration():
     with patch.multiple(config, VOCAB_SERVER_URL="", VOCAB_INGEST_TOKEN=""):
         assert candidates._handled_from_server() is None
+
+
+def configured():
+    return patch.multiple(
+        config,
+        VOCAB_SERVER_URL="https://vocab.example.com",
+        VOCAB_INGEST_TOKEN="secret",
+    )
 
 
 # --------------------------------------------------------------------------
@@ -402,6 +464,10 @@ if __name__ == "__main__":
         test_repetition_breaks_ties_between_similarly_common_words,
         test_utility_outranks_repetition,
         test_empty_transcript_yields_nothing,
+        test_exclusion_matches_inflected_headwords,
+        test_exclusion_matches_regardless_of_case_and_spacing,
+        test_server_failure_is_logged_not_swallowed,
+        test_network_error_falls_back_quietly_but_logs,
         test_already_handled_prefers_the_server,
         test_already_handled_falls_back_when_the_server_is_down,
         test_server_lookup_is_skipped_without_configuration,
