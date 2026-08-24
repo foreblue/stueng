@@ -77,8 +77,21 @@ def _localtime(when: dt.datetime | None) -> str:
     return when.astimezone(study.timezone()).strftime("%m-%d %H:%M") if when else "—"
 
 
+def _external_url(url: str | None) -> str | None:
+    """링크로 걸어도 되는 주소인가.
+
+    source_url 은 NPR 피드나 /ingest 를 통해 들어오므로 우리가 쓴 값이 아니다.
+    속성 이스케이프는 `javascript:` 를 막지 못하기 때문에 스킴을 직접 본다.
+    지금 알려진 공격 경로는 없지만, 판정이 한 줄이고 신뢰 경계 밖의 값이다.
+    """
+    if not url:
+        return None
+    return url if url.lower().startswith(("http://", "https://")) else None
+
+
 templates.env.filters["until"] = _until
 templates.env.filters["localtime"] = _localtime
+templates.env.filters["external_url"] = _external_url
 
 
 def db() -> Session:
