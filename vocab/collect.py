@@ -39,6 +39,7 @@ from .models import (
     SOURCE_UPFIRST,
     Occurrence,
     Word,
+    kind_for,
     sentence_key,
 )
 
@@ -72,6 +73,10 @@ class Entry:
     sentence: str | None = None
     translation_kr: str | None = None
     source_url: str | None = None
+
+    def __post_init__(self) -> None:
+        # 어디서 왔든(LLM 분류, 수업 노트 표, /ingest 페이로드) 종류는 형태가 정한다.
+        self.kind = kind_for(self.display)
 
     @property
     def headword(self) -> str:

@@ -32,8 +32,24 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
+from . import banding
+
 KIND_WORD = "word"
 KIND_EXPRESSION = "expression"
+
+
+def kind_for(display: str) -> str:
+    """표기 형태로 종류를 정한다.
+
+    예전에는 LLM 이 `vocabulary` 에 넣었는지 `expressions` 에 넣었는지로 정했다.
+    그러면 'missing in action' 이 word 가 되고 'backfire' 가 expression 이 된다 —
+    실제로 676개 중 58개가 어긋나 있었다.
+
+    종류가 하는 일이 둘이라 이게 그냥 라벨 문제가 아니다. 4지선다의 오답 보기를
+    같은 종류에서 뽑으므로 세 단어짜리와 한 단어짜리가 섞이고, 산출 단계의 질문도
+    "이 뜻의 단어는?" 과 "이 뜻의 표현은?" 으로 갈린다. 둘 다 형태를 따라야 맞다.
+    """
+    return KIND_EXPRESSION if banding.is_phrase(display) else KIND_WORD
 
 SOURCE_UPFIRST = "upfirst"
 SOURCE_PLANETMONEY = "planetmoney"
