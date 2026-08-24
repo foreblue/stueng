@@ -30,6 +30,7 @@ from sqlalchemy.orm import Session
 from . import banding
 from .db import REPO_ROOT, create_all, make_engine, session_factory
 from .models import (
+    Card,
     KIND_EXPRESSION,
     KIND_WORD,
     SOURCE_CLASS,
@@ -245,7 +246,7 @@ def parse_class_note(path: Path) -> list[Entry]:
     entries: list[Entry] = []
 
     for heading, rows in tables.items():
-        if "새 단어" in heading or "표현" in heading and "교정" not in heading:
+        if ("새 단어" in heading or "표현" in heading) and "교정" not in heading:
             # | 표현 | 뜻 | 예문 |
             for cells in rows[1:] if _is_header(rows[0], ("표현", "뜻")) else rows:
                 if len(cells) < 2:
@@ -418,15 +419,37 @@ def collect(*, rebuild: bool = False, prepared: tuple[list[Entry], Stats] | None
 
     with Session_() as session:
         if rebuild:
-            session.execute(delete(Occurrence))
-            session.execute(delete(Word))
-            session.commit()
+            _rebuild(session, stats)
 
         for entry in entries:
             upsert(session, entry, stats)
         session.commit()
 
     return stats
+
+
+def _rebuild(session: Session, stats: Stats) -> None:
+    """어휘를 비우고 다시 만든다. **카드가 달린 어휘는 건드리지 않는다.**
+
+    `word` 를 통째로 지우면 DB 의 ON DELETE CASCADE 가 card -> review_log 까지
+    따라 내려간다. review_log 는 어디에도 사본이 없는 유일한 데이터이고 소급해서
+    만들 수도 없는데, 그것이 `--rebuild` 라는 이름 뒤에 숨어 있었다.
+
+    카드가 있는 어휘는 남겨도 손해가 없다. 어차피 이어지는 upsert 가 같은
+    (표제어, 종류) 로 찾아 갱신한다.
+    """
+    protected = select(Card.word_id).scalar_subquery()
+
+    kept = session.scalar(
+        select(func.count()).select_from(Word).where(Word.id.in_(protected))
+    ) or 0
+    session.execute(delete(Occurrence).where(Occurrence.word_id.notin_(protected)))
+    session.execute(delete(Word).where(Word.id.notin_(protected)))
+    session.commit()
+
+    if kept:
+        stats.skipped.append(f"카드가 달린 어휘 {kept}개는 복습 기록 보호를 위해 유지")
+        logger.warning("카드가 달린 어휘 %d개는 지우지 않았습니다 (복습 기록 보호)", kept)
 
 
 def summarize(stats: Stats) -> str:

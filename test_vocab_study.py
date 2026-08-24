@@ -118,14 +118,31 @@ def test_corrections_are_introduced_first():
     assert cards[0].word.display == "I really like it"
 
 
-def test_core_band_beats_known_band():
+def test_only_core_band_becomes_cards():
+    """known/rare 는 카드로 만들지 않는다.
+
+    순위만 매기고 거르지 않으면 core 가 바닥난 뒤 이미 아는 단어(settlements,
+    poverty…)와 조어로 매일 10장씩 카드가 생긴다. /api/handled 는 그 둘을
+    "이미 다루는 것" 으로 빼고 있으므로 시스템의 두 쪽이 서로 다른 말을 하게 된다.
+    """
     session = make_session()
     add_word(session, "poverty", "빈곤", band="known", sentences=["x", "y", "z"])
+    add_word(session, "malinvestment", "잘못된 투자", band="rare")
     add_word(session, "stalemate", "교착", band="core")
     session.commit()
 
-    cards = study.introduce(session, 1, NOON)
-    assert cards[0].word.display == "stalemate"
+    cards = study.introduce(session, 10, NOON)
+    assert [c.word.display for c in cards] == ["stalemate"]
+
+
+def test_no_new_cards_when_core_runs_out():
+    """억지로 채우는 것보다 0 이라고 말하는 편이 정직하다."""
+    session = make_session()
+    add_word(session, "poverty", "빈곤", band="known")
+    session.commit()
+
+    assert study.introduce(session, 10, NOON) == []
+    assert study.queue_state(session, NOON).new_remaining == 0
 
 
 def test_words_with_more_examples_come_first():
@@ -478,6 +495,30 @@ def test_answer_writes_objective_metrics():
     assert entry.occurrence_id == word.occurrences[0].id
     assert entry.correct is True
     assert entry.in_session_retry is False
+
+
+def test_learning_steps_are_not_mistaken_for_retries():
+    """학습 단계(1/6/12분)로 같은 날 다시 나온 것은 재인출이 아니다.
+
+    오답 여부를 안 보면 신규 카드의 2·3회차가 전부 재인출로 찍혀서, 이 필드로는
+    아무것도 구분할 수 없게 된다.
+    """
+    session = make_session()
+    for i in range(5):
+        add_word(session, f"filler{i}", f"채움{i}")
+    card = add_card(session, add_word(session, "stalemate", "교착 상태"), stability=1.0)
+    session.commit()
+
+    rng = random.Random(5)
+    now = NOON
+    for _ in range(3):
+        question = study.build_question(session, card, rng=rng)
+        study.answer(session, question, question.answer, now=now)
+        now += dt.timedelta(minutes=7)
+    session.commit()
+
+    flags = [entry.in_session_retry for entry in session.scalars(select(ReviewLog)).all()]
+    assert flags == [False, False, False], f"모두 정답인데 재인출로 찍혔다: {flags}"
 
 
 def test_second_attempt_is_flagged_as_in_session_retry():

@@ -249,6 +249,25 @@ def test_marking_a_word_known_suspends_its_card_without_deleting_history():
         assert card_id not in study.queue_state(session).due
 
 
+def test_known_button_returns_to_the_word_page():
+    """조각만 돌려주면 CSS 도 내비게이션도 없는 맨 HTML 에 사용자가 갇힌다.
+
+    어휘 상세 화면에는 조각을 갈아 끼울 자바스크립트가 없다 — study.js 는 #card 가
+    있을 때만 붙는다.
+    """
+    client = login(fresh_client(words=1))
+    with main.Session_() as session:
+        word_id = session.scalar(select(Word.id))
+
+    response = client.post(f"/words/{word_id}/known", follow_redirects=False)
+    assert response.status_code == 303
+    assert response.headers["location"] == f"/words/{word_id}"
+
+    page = client.post(f"/words/{word_id}/known", follow_redirects=True)
+    assert "<html" in page.text, "완전한 페이지로 돌아와야 한다"
+    assert "다시 학습하기" in page.text or "이미 아는 단어" in page.text
+
+
 def test_unknown_word_id_is_a_404():
     client = login(fresh_client())
     assert client.get("/words/99999").status_code == 404

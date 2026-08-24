@@ -89,7 +89,9 @@ def from_transcript(
     # 'accusations' 를 이미 외우는 중인데 'accusation' 이 새 후보로 다시 올라온다.
     # 실제로 표제어 268개 중 60개가 원형과 다르다.
     skip = {_key(word) for word in exclude} | {_key(word) for word in BOILERPLATE}
-    proper = _proper_nouns(transcript)
+    # 후보 키가 원형이므로 고유명사도 같은 규칙으로 맞춘다. 안 그러면
+    # 'Emirates' 를 걸러 놓고도 원형 'emirate' 가 후보로 올라온다.
+    proper = {_key(word) for word in _proper_nouns(transcript)}
 
     scored: list[tuple[float, str]] = []
     for word, count in counts(transcript).items():

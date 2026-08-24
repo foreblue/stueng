@@ -27,7 +27,7 @@ import re
 from dataclasses import dataclass, field
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import case, exists, func, select
+from sqlalchemy import exists, func, select
 from sqlalchemy.orm import Session
 
 from . import banding, scheduler
@@ -99,10 +99,16 @@ def day_start(now: dt.datetime | None = None) -> dt.datetime:
 def _new_word_query():
     """카드가 아직 없는 어휘를 우선순위 순으로.
 
+    core 밴드만 들인다. known 은 이미 알 확률이 높고 rare 는 조어에 가깝다 —
+    `/api/handled` 도 그 둘을 "이미 다루는 것" 으로 빼고 있으므로, 여기서 카드로
+    만들면 시스템의 두 쪽이 서로 다른 말을 하게 된다. core 가 바닥나면 새 카드는
+    나오지 않는다. 억지로 채우는 것보다 0 이라고 말하는 편이 정직하다.
+
+    그 안에서의 순서:
+
     1. 수업에서 내가 틀려 교정받은 표현 — 개인화의 핵심 재료다.
-    2. core 밴드 (known 은 이미 알 확률이 높고, rare 는 조어에 가깝다)
-    3. 예문이 많은 것 — 문맥 순환이 가능한 카드가 더 값지다.
-    4. 먼저 만난 것
+    2. 예문이 많은 것 — 문맥 순환이 가능한 카드가 더 값지다.
+    3. 먼저 만난 것
     """
     is_correction = (
         select(1)
@@ -115,17 +121,15 @@ def _new_word_query():
         .where(Occurrence.word_id == Word.id)
         .scalar_subquery()
     )
-    band_rank = case(
-        {banding.BAND_CORE: 0, banding.BAND_KNOWN: 1, banding.BAND_RARE: 2},
-        value=Word.band,
-        else_=3,
-    )
     return (
         select(Word)
-        .where(~exists().where(Card.word_id == Word.id), Word.known.is_(False))
+        .where(
+            ~exists().where(Card.word_id == Word.id),
+            Word.known.is_(False),
+            Word.band.in_(banding.STUDY_BANDS),
+        )
         .order_by(
             is_correction.desc(),
-            band_rank.asc(),
             occurrence_count.desc(),
             Word.first_seen.asc(),
             Word.id.asc(),
@@ -515,11 +519,17 @@ def answer(
         self_easy=self_easy,
     )
 
-    # 같은 세션에서 이미 틀렸다가 다시 온 카드인지 — successive relearning 표시.
+    # 같은 세션에서 이미 **틀렸다가** 다시 온 카드인지 — successive relearning 표시.
+    # 오답 여부를 안 보면 학습 단계(1/6/12분) 때문에 신규 카드의 2·3회차가 전부
+    # 재인출로 찍힌다. 그러면 이 필드로는 아무것도 구분할 수 없다.
     retry = session.scalar(
         select(func.count())
         .select_from(ReviewLog)
-        .where(ReviewLog.card_id == card.id, ReviewLog.reviewed_at >= day_start(now))
+        .where(
+            ReviewLog.card_id == card.id,
+            ReviewLog.reviewed_at >= day_start(now),
+            ReviewLog.correct.is_(False),
+        )
     ) or 0
 
     before = engine.review(card, rating, now, duration_ms=response_ms)

@@ -69,17 +69,17 @@ def push(*, dry_run: bool = False) -> dict:
     prepared = collect.gather()
     entries, gather_stats = prepared
 
-    local = collect.collect(prepared=prepared)
-    logger.info(
-        "로컬 저장소 갱신: 새 어휘 %d, 새 예문 %d", local.words_created, local.occurrences_created
-    )
-
     if dry_run:
         by_source: dict[str, int] = {}
         for entry in entries:
             by_source[entry.source_kind] = by_source.get(entry.source_kind, 0) + 1
         return {"dry_run": True, "entries": len(entries), "by_source": by_source,
                 "files": gather_stats.files, "skipped": gather_stats.skipped}
+
+    local = collect.collect(prepared=prepared)
+    logger.info(
+        "로컬 저장소 갱신: 새 어휘 %d, 새 예문 %d", local.words_created, local.occurrences_created
+    )
 
     base = _require()
     totals = {"received": 0, "words_created": 0, "words_updated": 0, "occurrences_created": 0}
@@ -134,7 +134,8 @@ def main(argv: list[str] | None = None) -> int:
     sub = parser.add_subparsers(dest="command", required=True)
 
     push_parser = sub.add_parser("push", help="어휘를 모아 서버로 밀어 올린다")
-    push_parser.add_argument("--dry-run", action="store_true", help="보내지 않고 내용만 확인")
+    push_parser.add_argument("--dry-run", action="store_true",
+                             help="아무것도 쓰지 않고 무엇이 갈지만 확인")
     sub.add_parser("notify", help="오늘 복습할 게 있으면 텔레그램으로 알린다")
     sub.add_parser("status", help="서버 현황 출력")
 
