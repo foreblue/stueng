@@ -92,12 +92,27 @@ def from_transcript(
     return [word for _, word in scored[:limit]]
 
 
-def already_handled() -> set[str]:
-    """이미 학습 중이거나 안다고 표시한 표제어.
+def _handled_from_server() -> set[str] | None:
+    """서버가 아는 "이미 다루는 표제어". 못 물어보면 None."""
+    import config
+    import requests
 
-    저장소를 못 열면 빈 집합을 돌려준다. 후보 선정은 이것 없이도 성립하고,
-    저장소가 없다고 파이프라인이 멈추면 안 된다.
-    """
+    if not config.VOCAB_SERVER_URL or not config.VOCAB_INGEST_TOKEN:
+        return None
+    try:
+        response = requests.get(
+            f"{config.VOCAB_SERVER_URL}/api/handled",
+            headers={"X-Ingest-Token": config.VOCAB_INGEST_TOKEN},
+            timeout=10,
+        )
+        if not response.ok:
+            return None
+        return {w.lower() for w in response.json()["headwords"]}
+    except Exception:
+        return None
+
+
+def _handled_from_local() -> set[str]:
     try:
         from sqlalchemy import select
 
@@ -115,6 +130,22 @@ def already_handled() -> set[str]:
             return {row[0] for row in rows}
     except Exception:  # pragma: no cover - 저장소가 아직 없을 수 있다
         return set()
+
+
+def already_handled() -> set[str]:
+    """이미 학습 중이거나 안다고 표시한 표제어.
+
+    학습 상태는 서버가 원본이므로 서버에 먼저 묻는다. 카드가 서버로 옮겨간 뒤로
+    로컬 Card 테이블은 비어 있어서, 로컬만 보면 이미 외우는 중인 단어를 다시 후보로
+    올리게 된다.
+
+    서버가 안 뜨거나 설정이 없으면 로컬로 물러난다. 후보 선정은 이것 없이도 성립하고,
+    서버가 잠깐 안 된다고 아침 파이프라인이 멈추면 안 된다.
+    """
+    from_server = _handled_from_server()
+    if from_server is not None:
+        return from_server
+    return _handled_from_local()
 
 
 def for_episode(transcript: str, *, limit: int = 15) -> list[str]:

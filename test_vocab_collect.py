@@ -11,7 +11,11 @@ sys.path.insert(0, os.path.dirname(__file__))
 
 from sqlalchemy import select
 
-from vocab import banding, collect
+from unittest.mock import patch
+
+import config
+
+from vocab import banding, candidates, collect
 from vocab.db import create_all, make_engine, session_factory
 from vocab.models import KIND_EXPRESSION, KIND_WORD, Occurrence, Word
 
@@ -57,6 +61,86 @@ def test_lemma_and_surface_both_considered():
 def test_normalize_strips_punctuation_and_case():
     assert banding.normalize('  "Sedentary."  ') == "sedentary"
     assert banding.normalize("Break  the\tice") == "break the ice"
+
+
+# --------------------------------------------------------------------------
+# 후보 선정
+# --------------------------------------------------------------------------
+
+TRANSCRIPT = """
+    Support for this podcast comes from our sponsor. Subscribe to our newsletter.
+    The ceasefire is showing cracks. Iran and Pakistan traded accusations, and the
+    monetary policy response has been restrictive. Inflation expectations remain
+    elevated. Pakistan says the ceasefire holds. This episode was produced by Rennie.
+"""
+
+
+def test_boilerplate_is_excluded():
+    """광고 낭독·제작진 크레딧에서 오는 말은 에피소드 내용과 무관하다."""
+    picked = candidates.from_transcript(TRANSCRIPT, limit=30)
+    for junk in ("podcast", "sponsor", "newsletter", "subscribe", "produce"):
+        assert junk not in picked, junk
+
+
+def test_proper_nouns_are_excluded():
+    """인명·지명·기관명은 어휘 학습 대상이 아니다."""
+    picked = candidates.from_transcript(TRANSCRIPT, limit=30)
+    assert "iran" not in picked and "pakistan" not in picked and "rennie" not in picked
+
+
+def test_only_core_band_words_become_candidates():
+    picked = candidates.from_transcript(TRANSCRIPT, limit=30)
+    assert picked, "후보가 하나도 안 나오면 안 된다"
+    for word in picked:
+        assert banding.band(word) == banding.BAND_CORE, f"{word} -> {banding.band(word)}"
+
+
+def test_exclude_set_is_honoured():
+    picked = candidates.from_transcript(TRANSCRIPT, limit=30)
+    assert "monetary" in picked
+    trimmed = candidates.from_transcript(TRANSCRIPT, limit=30, exclude={"Monetary"})
+    assert "monetary" not in trimmed, "대소문자 무관하게 빠져야 한다"
+
+
+def test_repetition_breaks_ties_between_similarly_common_words():
+    """반복은 순위를 뒤집는 힘이 아니라 비슷한 것들 사이의 타이브레이크다.
+
+    활용도(zipf)가 먼저다 — 고빈도 단어에서 학습 격차가 가장 크게 벌어진다는 결과에
+    맞춘 것이다. interim 과 portal 은 zipf 가 같으므로 반복 횟수가 순서를 정한다.
+    """
+    text = "The portal opened. " * 4 + "An interim report followed."
+    picked = candidates.from_transcript(text, limit=10)
+    assert picked.index("portal") < picked.index("interim")
+
+
+def test_utility_outranks_repetition():
+    """훨씬 흔한 단어는 반복 몇 번으로 밀리지 않는다."""
+    text = "The stalemate continues. " * 5 + "There was one mention of jurisdiction."
+    picked = candidates.from_transcript(text, limit=10)
+    assert picked.index("jurisdiction") < picked.index("stalemate")
+
+
+def test_empty_transcript_yields_nothing():
+    assert candidates.from_transcript("") == []
+
+
+def test_already_handled_prefers_the_server():
+    """학습 상태는 서버가 원본이다. 로컬 Card 는 배포 후 비어 있다."""
+    with patch.object(candidates, "_handled_from_server", return_value={"poverty"}), \
+         patch.object(candidates, "_handled_from_local", return_value={"local-only"}):
+        assert candidates.already_handled() == {"poverty"}
+
+
+def test_already_handled_falls_back_when_the_server_is_down():
+    """서버가 잠깐 안 된다고 아침 파이프라인이 멈추면 안 된다."""
+    with patch.object(candidates, "_handled_from_server", return_value=None), \
+         patch.object(candidates, "_handled_from_local", return_value={"local"}):
+        assert candidates.already_handled() == {"local"}
+
+
+def test_server_lookup_is_skipped_without_configuration():
+    with patch.multiple(config, VOCAB_SERVER_URL="", VOCAB_INGEST_TOKEN=""):
+        assert candidates._handled_from_server() is None
 
 
 # --------------------------------------------------------------------------
@@ -311,6 +395,16 @@ if __name__ == "__main__":
         test_phrases_never_banded_by_frequency,
         test_lemma_and_surface_both_considered,
         test_normalize_strips_punctuation_and_case,
+        test_boilerplate_is_excluded,
+        test_proper_nouns_are_excluded,
+        test_only_core_band_words_become_candidates,
+        test_exclude_set_is_honoured,
+        test_repetition_breaks_ties_between_similarly_common_words,
+        test_utility_outranks_repetition,
+        test_empty_transcript_yields_nothing,
+        test_already_handled_prefers_the_server,
+        test_already_handled_falls_back_when_the_server_is_down,
+        test_server_lookup_is_skipped_without_configuration,
         test_parse_daily_reads_vocabulary_and_expressions,
         test_parse_daily_skips_failed_analysis,
         test_parse_weekly_maps_day_to_study_date,

@@ -305,6 +305,27 @@ def test_ingest_rejects_malformed_entries():
                        headers={"X-Ingest-Token": "ingest-secret"}).status_code == 422
 
 
+def test_handled_endpoint_lists_words_to_skip():
+    """로컬 파이프라인이 새 후보를 고를 때 뺄 목록. 카드가 서버로 옮겨간 뒤로
+    로컬만 보고는 알 수 없다."""
+    client = login(fresh_client(words=2))
+    with main.Session_() as session:
+        card = study.next_card(session)
+        carded = card.word.headword
+        other = session.scalars(select(Word).where(Word.id != card.word_id)).first()
+        other.band = "known"
+        session.commit()
+
+    payload = client.get("/api/handled", headers={"X-Ingest-Token": "ingest-secret"}).json()
+    assert carded in payload["headwords"], "카드가 있는 어휘는 빠져야 한다"
+    assert other.headword in payload["headwords"], "known 밴드도 빠져야 한다"
+
+
+def test_handled_endpoint_requires_the_token():
+    client = fresh_client(words=1)
+    assert client.get("/api/handled").status_code == 401
+
+
 def test_export_contains_every_table():
     client = login(fresh_client(words=2))
     with main.Session_() as session:
