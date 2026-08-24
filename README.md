@@ -89,6 +89,10 @@ VOCAB_SECRET_KEY=...
 VOCAB_INGEST_TOKEN=...   # stueng/.env 와 동일
 ```
 
+`VOCAB_ENV=production` 은 `docker-compose.yml` 이 직접 넣는다. 다른 곳에 배포한다면
+반드시 함께 넘겨야 한다 — 빠지면 쿠키에서 `Secure` 가 사라지고 `VOCAB_SECRET_KEY`
+누락도 조용히 넘어간다(재시작마다 로그아웃된다).
+
 ### 루프백 포트 8010
 
 컨테이너는 Traefik 뒤에 있으면서 `127.0.0.1:8010` 에도 묶여 있다. 공유기가 헤어핀
@@ -148,6 +152,7 @@ Postgres 로 옮기려면 `requirements-app.txt` 의 `psycopg[binary]` 주석을
 | `VOCAB_APP_URL` | 로컬 | 알림에 넣을 주소. 비우면 서버 주소를 쓴다 |
 | `VOCAB_INGEST_TOKEN` | 양쪽 | 기계용 API 인증. 양쪽이 같아야 한다 |
 | `VOCAB_DB_URL` | 양쪽 | 비우면 로컬 `data/vocab.db` |
+| `VOCAB_ENV` | 서버 | `production` 이어야 한다. 아니면 세션 쿠키에서 `Secure` 가 빠지고 설정 누락 검사도 꺼진다 |
 | `VOCAB_PASSWORD` | 서버 | 로그인 비밀번호 |
 | `VOCAB_SECRET_KEY` | 서버 | 쿠키·출제 토큰 서명 |
 | `VOCAB_TZ` | 양쪽 | 기본 `Asia/Seoul` |

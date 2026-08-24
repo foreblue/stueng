@@ -268,6 +268,29 @@ def test_known_button_returns_to_the_word_page():
     assert "다시 학습하기" in page.text or "이미 아는 단어" in page.text
 
 
+def test_javascript_urls_are_not_rendered_as_links():
+    """source_url 은 NPR 피드와 /ingest 에서 온다 — 우리가 쓴 값이 아니다.
+
+    속성 이스케이프는 javascript: 스킴을 막지 못한다.
+    """
+    client = login(fresh_client(words=1))
+    with main.Session_() as session:
+        occurrence = session.scalar(select(Occurrence))
+        occurrence.source_url = "javascript:alert(document.cookie)"
+        word_id = occurrence.word_id
+        session.commit()
+
+    page = client.get(f"/words/{word_id}").text
+    assert "javascript:" not in page
+    assert "테스트 에피소드" in page, "링크만 빠지고 출처 표시는 남아야 한다"
+
+    assert main._external_url("https://example.com/ep") == "https://example.com/ep"
+    assert main._external_url("http://example.com/ep") == "http://example.com/ep"
+    assert main._external_url("JavaScript:alert(1)") is None
+    assert main._external_url("data:text/html,<script>") is None
+    assert main._external_url(None) is None
+
+
 def test_unknown_word_id_is_a_404():
     client = login(fresh_client())
     assert client.get("/words/99999").status_code == 404

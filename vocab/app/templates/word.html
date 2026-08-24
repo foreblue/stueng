@@ -34,7 +34,7 @@
         <blockquote class="quote">{{ o.sentence }}</blockquote>
         <p class="source">
           <span class="tag src-{{ o.source_kind }}">{{ o.source_kind }}</span>
-          {% if o.source_url %}<a href="{{ o.source_url }}" target="_blank" rel="noopener">{{ o.source_title }}</a>
+          {% if o.source_url | external_url %}<a href="{{ o.source_url | external_url }}" target="_blank" rel="noopener">{{ o.source_title }}</a>
           {% else %}{{ o.source_title }}{% endif %}
           · {{ o.occurred_on }}
         </p>
