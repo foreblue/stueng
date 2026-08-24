@@ -18,7 +18,7 @@ import requests
 
 from vocab import banding, candidates, collect
 from vocab.db import create_all, make_engine, session_factory
-from vocab.models import KIND_EXPRESSION, KIND_WORD, Occurrence, Word
+from vocab.models import KIND_EXPRESSION, KIND_WORD, Card, Occurrence, ReviewLog, Word
 
 
 def _memory_session():
@@ -81,6 +81,17 @@ def test_boilerplate_is_excluded():
     picked = candidates.from_transcript(TRANSCRIPT, limit=30)
     for junk in ("podcast", "sponsor", "newsletter", "subscribe", "produce"):
         assert junk not in picked, junk
+
+
+def test_proper_nouns_are_excluded_even_when_inflected():
+    """후보 키가 원형이므로 고유명사도 원형으로 걸러야 한다.
+
+    'Emirates' 를 고유명사로 잡아 놓고 원형 'emirate' 가 후보로 올라오면 걸러낸
+    의미가 없다. LLM 에게 지명 조각을 학습 단어로 넘기게 된다.
+    """
+    text = ("The United Arab Emirates signed. Emirates officials met. "
+            "Emirates again. Emirates. Emirates. Emirates.")
+    assert candidates.from_transcript(text, limit=10) == []
 
 
 def test_proper_nouns_are_excluded():
@@ -322,6 +333,68 @@ CLASS_NOTE = """# 영어수업 2026-08-20
 """
 
 
+def test_heading_match_is_not_confused_by_a_combined_title():
+    """`a or b and c` 는 `a or (b and c)` 로 묶인다 — '교정' 가드가 첫 항에 안 걸렸다.
+
+    '## 새 단어·표현 교정' 같은 제목이 오면 교정 행이 새 단어 파서로 들어가
+    display 에 '내가 한 말'(틀린 표현)이, meaning_kr 에 자연스러운 표현이 들어간다.
+    정확히 거꾸로다.
+    """
+    note = CLASS_NOTE.replace("## 내 표현 교정", "## 새 단어·표현 교정")
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "영어수업 2026-08-20.md"
+        path.write_text(note, encoding="utf-8")
+        entries = collect.parse_class_note(path)
+
+    corrections = [e for e in entries if e.source_kind == "correction"]
+    assert corrections, "제목이 합쳐져도 교정으로 읽혀야 한다"
+    assert corrections[0].headword == "i really like remote work"
+
+
+def test_rebuild_never_deletes_review_history():
+    """`--rebuild` 가 word 를 통째로 지우면 CASCADE 로 card -> review_log 까지 내려간다.
+
+    review_log 는 어디에도 사본이 없고 소급해서 만들 수도 없는 데이터다.
+    """
+    session = _memory_session()
+    stats = collect.Stats()
+    collect.upsert(session, _entry("carded", "A sentence."), stats)
+    collect.upsert(session, _entry("plain", "Another sentence."), stats)
+    session.flush()
+
+    word = session.scalar(select(Word).where(Word.headword == "carded"))
+    card = Card(word_id=word.id, due=dt.datetime.now(dt.UTC))
+    session.add(card)
+    session.flush()
+    session.add(
+        ReviewLog(card_id=card.id, rating=3, state=2, reviewed_at=dt.datetime.now(dt.UTC),
+                  correct=True, stage="recognition", elapsed_days=0,
+                  last_elapsed_days=0, scheduled_days=0)
+    )
+    session.commit()
+
+    collect._rebuild(session, collect.Stats())
+
+    assert len(session.scalars(select(ReviewLog)).all()) == 1, "복습 기록이 지워졌다"
+    assert len(session.scalars(select(Card)).all()) == 1
+    remaining = [w.headword for w in session.scalars(select(Word)).all()]
+    assert remaining == ["carded"], f"카드 없는 어휘만 지워야 한다: {remaining}"
+
+
+def test_rebuild_reports_what_it_kept():
+    session = _memory_session()
+    stats = collect.Stats()
+    collect.upsert(session, _entry("carded", "A sentence."), stats)
+    session.flush()
+    word = session.scalar(select(Word))
+    session.add(Card(word_id=word.id, due=dt.datetime.now(dt.UTC)))
+    session.commit()
+
+    report = collect.Stats()
+    collect._rebuild(session, report)
+    assert any("복습 기록" in line for line in report.skipped), report.skipped
+
+
 def test_parse_class_note_reads_both_tables():
     with tempfile.TemporaryDirectory() as tmp:
         path = Path(tmp) / "영어수업 2026-08-20.md"
@@ -474,6 +547,10 @@ if __name__ == "__main__":
         test_parse_daily_reads_vocabulary_and_expressions,
         test_parse_daily_skips_failed_analysis,
         test_parse_weekly_maps_day_to_study_date,
+        test_proper_nouns_are_excluded_even_when_inflected,
+        test_heading_match_is_not_confused_by_a_combined_title,
+        test_rebuild_never_deletes_review_history,
+        test_rebuild_reports_what_it_kept,
         test_parse_class_note_reads_both_tables,
         test_parse_class_note_ignores_empty_template_rows,
         test_same_word_from_two_sources_merges_into_one_row,

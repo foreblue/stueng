@@ -80,14 +80,16 @@ def test_push_requires_ingest_token():
             raise AssertionError("토큰 없이 밀어 올리면 안 된다")
 
 
-def test_dry_run_never_touches_the_network():
+def test_dry_run_writes_nothing_anywhere():
+    """"보내지 않고 내용만 확인" 은 로컬 저장소도 건드리지 않는다는 뜻으로 읽힌다."""
     stats = collect.Stats(files=3)
     with configured(), \
          patch.object(collect, "gather", return_value=([entry("a"), entry("b")], stats)), \
-         patch.object(collect, "collect", return_value=collect.Stats()), \
+         patch.object(collect, "collect") as local, \
          patch.object(requests, "post") as post:
         result = sync.push(dry_run=True)
         post.assert_not_called()
+        local.assert_not_called()
 
     assert result["entries"] == 2
     assert result["by_source"] == {"upfirst": 2}

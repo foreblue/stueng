@@ -337,7 +337,7 @@ def word_detail(request: Request, session: DB, word_id: int):
     )
 
 
-@app.post("/words/{word_id}/known", response_class=HTMLResponse)
+@app.post("/words/{word_id}/known")
 def toggle_known(request: Request, session: DB, word_id: int):
     """이미 아는 단어 표시. 빈도 밴드 판정을 사람이 덮어쓰는 장치다.
 
@@ -350,7 +350,11 @@ def toggle_known(request: Request, session: DB, word_id: int):
     if word.card:
         word.card.suspended = word.known
     session.commit()
-    return templates.TemplateResponse(request, "_known_button.html", {"word": word})
+
+    # 어휘 상세 화면에는 조각을 갈아 끼울 자바스크립트가 없다(study.js 는 #card 가
+    # 있을 때만 붙는다). 조각을 그대로 돌려주면 CSS 도 내비게이션도 없는 맨 HTML 에
+    # 사용자가 갇힌다. 평범한 POST-redirect-GET 으로 되돌린다.
+    return RedirectResponse(f"/words/{word_id}", status_code=status.HTTP_303_SEE_OTHER)
 
 
 # --------------------------------------------------------------------------
