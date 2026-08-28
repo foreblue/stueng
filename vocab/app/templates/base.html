@@ -9,7 +9,7 @@
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="icon" href="/static/icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="/static/icon.svg">
-<link rel="stylesheet" href="/static/app.css">
+<link rel="stylesheet" href="{{ static_url('app.css') }}">
 </head>
 <body>
 <header class="bar">
@@ -26,6 +26,6 @@
 {% block content %}{% endblock %}
 </main>
 
-<script src="/static/study.js" defer></script>
+<script src="{{ static_url('study.js') }}" defer></script>
 </body>
 </html>

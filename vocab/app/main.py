@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import hashlib
 import mimetypes
 import os
 from contextlib import asynccontextmanager
@@ -58,6 +59,23 @@ app = FastAPI(title="stueng vocab", lifespan=lifespan, docs_url=None, redoc_url=
 mimetypes.add_type("font/woff2", ".woff2")
 
 app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
+
+
+def static_url(name: str) -> str:
+    """내용 해시를 붙인 정적 파일 주소.
+
+    붙이지 않으면 `Cache-Control` 이 없는 응답을 브라우저가 휴리스틱으로 캐시해,
+    배포한 뒤에도 옛 CSS 를 재검증 없이 계속 쓴다. 홈화면에 붙여 둔 PWA 에서 특히
+    잘 일어난다 — 디자인을 바꿔도 반영되지 않는 것처럼 보인다.
+
+    파일은 프로세스가 도는 동안 바뀌지 않으므로 기동 시 한 번만 읽는다.
+    """
+    path = BASE_DIR / "static" / name
+    try:
+        digest = hashlib.sha256(path.read_bytes()).hexdigest()[:10]
+    except OSError:  # pragma: no cover - 파일이 없으면 주소만 낸다
+        return f"/static/{name}"
+    return f"/static/{name}?v={digest}"
 templates = Jinja2Templates(directory=BASE_DIR / "templates")
 
 
@@ -94,6 +112,7 @@ def _external_url(url: str | None) -> str | None:
     return url if url.lower().startswith(("http://", "https://")) else None
 
 
+templates.env.globals["static_url"] = static_url
 templates.env.filters["until"] = _until
 templates.env.filters["localtime"] = _localtime
 templates.env.filters["external_url"] = _external_url
