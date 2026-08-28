@@ -93,7 +93,7 @@ VOCAB_PASSWORD=dev VOCAB_INGEST_TOKEN=dev \
   uvicorn vocab.app.main:app --reload --port 8000
 ```
 
-수업 PC 에서 (이 저장소를 clone 해 두고, hosts 한 줄과 `VOCAB_REMOTE_TOKEN` 을 설정한 뒤):
+수업 PC 에서 (이 저장소를 clone 해 두고 `VOCAB_SERVER_URL`·`VOCAB_REMOTE_TOKEN` 을 설정한 뒤):
 
 ```bash
 python -m vocab.remote --note "영어수업 2026-08-28.md"   # 노트 그대로 (뜻 포함)
@@ -139,12 +139,15 @@ NAT 을 지원하지 않아 **내부에서 공인 주소로 되돌아오지 못�
 도는 것들(`vocab.sync push`, `vocab.tutor`, `vocab.optimize`)은 이 포트를 쓴다.
 LAN 에는 열려 있지 않다 — 루프백 전용이다.
 
-**수업 PC 는 이 포트를 쓰지 않는다.** 루프백 바인딩이라 LAN 에서 닿지 않는다. 대신
-게이트웨이를 그대로 쓴다 — Traefik 의 443 은 LAN 에도 열려 있고 이미 정식 인증서로
-`stueng.deepheart.duckdns.org` 를 서비스한다. 막힌 것은 이름 풀이뿐이므로 그 PC 의
-hosts 에 `192.168.45.93 stueng.deepheart.duckdns.org` 한 줄이면 된다. TLS 검증은
-정상으로 통과하고(이름에 대해 발급된 인증서다), 보안 헤더와 rate limit 도 그대로 걸린다.
-새로 여는 포트도, 끄는 검증도 없다.
+**수업 PC 는 이 포트를 쓰지 않는다.** 루프백 바인딩이라 LAN 에서 닿지 않고, 애초에
+업로드가 집 밖에서 일어난다. 그쪽은 게이트웨이의 공인 주소
+(`https://stueng.deepheart.duckdns.org`)를 그대로 쓴다 — 이미 정식 인증서로 서비스되고
+있고 DuckDNS 가 IP 를 따라간다. 열 포트도 터널도 없다.
+
+집 안에서 올릴 일이 생기면 그때만 그 PC 의 hosts 에
+`192.168.45.93 stueng.deepheart.duckdns.org` 를 넣는다. Traefik 443 은 LAN 에도 열려
+있고 인증서는 이름에 대해 발급된 것이라 검증도 정상이다. 밖으로 나갈 때 지워야 하므로
+기본으로 넣지는 않는다.
 
 같은 이유로 텔레그램 알림의 링크(`VOCAB_APP_URL`)는 집 안 와이파이에서는 열리지 않을
 수 있다. 셀룰러로는 정상이다.

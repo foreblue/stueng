@@ -210,6 +210,9 @@ OBS Studio (윈도우·리눅스 공통) 기준:
 `dysim@192.168.45.93`(호스트명 `mini`), 받는 곳은 `~/Movies/english-class/inbox/` 다.
 IP 가 바뀌었으면 맥에서 `ipconfig getifaddr en0` 로 다시 확인한다.
 
+**이 경로는 같은 와이파이일 때만 된다.** 사설 IP 라 밖에서는 닿지 않는다. 밖에서
+작업한다면 아래 "수업 PC 에서 바로 보내기" 를 쓴다 — 그쪽은 공인 주소라 어디서든 된다.
+
 ## 수업 PC 에서 바로 보내기
 
 **이 스킬이 그 PC 에서 돌고 있다면 C-3 에서 쓴 노트가 거기 쌓인다.** 맥의
@@ -254,23 +257,30 @@ export VOCAB_SERVER_URL=https://stueng.deepheart.duckdns.org
 export VOCAB_REMOTE_TOKEN=<게이트웨이 .env 의 VOCAB_REMOTE_TOKEN>
 ```
 
-그리고 hosts 파일에 한 줄. (리눅스 `/etc/hosts`, 윈도우
+이게 전부다. 게이트웨이(Traefik)가 이미 이 이름을 Let's Encrypt 인증서로 서비스하고
+있고, DuckDNS 가 공인 IP 를 따라가며 갱신한다. **집 밖에서는 그냥 닿는다** — 열 포트도,
+터널도, hosts 손질도 없다. 보안 헤더와 rate limit(분당 100)도 그대로 걸린다.
+
+주소는 반드시 **이름**으로 쓴다. 공인 IP 는 바뀌고, 그걸 따라가라고 DuckDNS 가 있다.
+
+<details>
+<summary>집 안(같은 와이파이)에서 보낼 때만 — hosts 한 줄</summary>
+
+공유기가 헤어핀 NAT 을 지원하지 않아, 집 안에서는 공인 주소로 되돌아오지 못한다.
+그때만 이름을 LAN IP 로 풀어 준다. (리눅스 `/etc/hosts`, 윈도우
 `C:\Windows\System32\drivers\etc\hosts` — 관리자 권한)
 
 ```
 192.168.45.93  stueng.deepheart.duckdns.org
 ```
 
-**왜 hosts 한 줄인가.** 게이트웨이(Traefik)가 이미 이 이름을 Let's Encrypt 인증서로
-서비스하고 있고 443 은 LAN 에도 열려 있다. 공유기가 헤어핀 NAT 을 지원하지 않아 집
-안에서 공인 IP 로는 되돌아오지 못할 뿐이라, **이름만 LAN IP 로 풀어 주면 그대로 닿는다.**
-인증서는 이름에 대해 발급된 것이라 검증도 정상으로 통과한다 — 새로 여는 포트도, 끄는
-검증도 없다. 보안 헤더와 rate limit(분당 100)도 그대로 걸린다.
+Traefik 의 443 은 LAN 에도 열려 있고 인증서는 이름에 대해 발급된 것이라, 이렇게 해도
+검증이 정상으로 통과한다. TLS 검증을 끄거나 http 로 우회할 이유는 없다.
 
-`VOCAB_APP_URL` 링크가 집 와이파이에서 안 열리는 것도 같은 이유인데, 이 hosts 한 줄이
-그 PC 에 한해 그것도 같이 고친다.
+**집 밖으로 나가면 이 줄을 지운다.** 남겨 두면 닿지 않는 사설 IP 를 계속 찾는다.
+그래서 밖에서 올리는 게 기본이라면 아예 넣지 않는 편이 낫다.
 
-**집 밖으로 가져가면 hosts 줄을 지운다.** 그때는 공인 IP 로 정상적으로 닿는다.
+</details>
 
 ### 토큰은 좁은 것을 쓴다
 
