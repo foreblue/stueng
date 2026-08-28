@@ -165,27 +165,40 @@ curl -H "X-Ingest-Token: $VOCAB_INGEST_TOKEN" \
 Postgres 로 옮기려면 `requirements-app.txt` 의 `psycopg[binary]` 주석을 풀고
 `VOCAB_DB_URL` 만 바꾸면 된다. 스키마는 동일하다.
 
-## cron
+## 정기 실행
 
-로컬 crontab. 시각은 취향대로.
+`crontab` 이 아니라 **`mycron`** (launchd `com.dysim.mycron`) 이 돌린다. 목록은
+`mycron list`, 추가는 `mycron add`.
 
-```cron
-# 아침 7시 — Up First 분석 + 어휘 전송
-0 7 * * *  cd ~/workspace/stueng && .venv/bin/python main.py >> logs/daily.log 2>&1
+### 등록돼 있는 것
 
-# 목요일 4시 반 — Planet Money 주간 학습 계획 생성
-30 4 * * 4 cd ~/workspace/stueng && .venv/bin/python weekly_study.py prepare >> logs/weekly.log 2>&1
-# 평일 7시 — 그날 차수의 단어·표현 전송
-0 7 * * 1-5 cd ~/workspace/stueng && .venv/bin/python weekly_study.py send   >> logs/weekly.log 2>&1
+| 이름 | 시각 | 하는 일 |
+| --- | --- | --- |
+| `stueng-daily` | `0 7 * * *` | Up First 일일 분석 |
+| `stueng-planetmoney-prepare` | `30 4 * * thu` | Planet Money 주간 학습 계획 |
+| `stueng-planetmoney-send` | `0 7 * * mon-fri` | 그날 차수의 단어·표현 전송 |
+| `stueng-vocab-push` | `10 7 * * *` | `vocab.sync push` |
 
-# 7시 — 어휘를 서버로 밀고 복습 알림
-0 7 * * *  cd ~/workspace/stueng && .venv/bin/python -m vocab.sync push   >> logs/sync.log 2>&1
-5 7 * * *  cd ~/workspace/stueng && .venv/bin/python -m vocab.sync notify >> logs/sync.log 2>&1
+### 아직 안 넣은 것 (2026-08-28 현재, 나중에 넣기로 함)
 
-# 저녁 9시 — 뜻 채우기·작문 첨삭·기억술 (LLM 프록시가 떠 있어야 한다)
-# 수업 PC 가 밀어 넣은 어휘는 이게 돌아야 카드가 된다.
-0 21 * * * cd ~/workspace/stueng && .venv/bin/python -m vocab.tutor >> logs/tutor.log 2>&1
+```bash
+mycron add --name stueng-vocab-tutor --cron '0 21 * * *' \
+  --command "/bin/bash -lc 'cd ~/workspace/stueng && .venv/bin/python -m vocab.tutor'" \
+  --skip-if-running --no-success-notify
+
+mycron add --name stueng-vocab-notify --cron '5 7 * * *' \
+  --command "/bin/bash -lc 'cd ~/workspace/stueng && .venv/bin/python -m vocab.sync notify'" \
+  --skip-if-running --no-success-notify
 ```
+
+**`vocab.tutor` 가 없으면 뜻이 빈 어휘가 영영 카드가 되지 않는다.** 수업 노트를
+`vocab.remote --note` 로 올리는 경로는 뜻이 이미 있어 영향이 없지만,
+`--transcript` / `--audio` 로 올린 후보는 뜻을 비운 채 들어오고 그걸 채우는 것이
+이 작업이다. 증상이 조용해서(카드가 안 늘 뿐이다) 없는 줄 모르고 지나가기 쉽다.
+전사문 경로를 쓰기 시작하면 그때는 반드시 넣어야 한다.
+
+`vocab.tutor` 는 로컬 LLM 프록시(`localhost:9000`)가 떠 있어야 한다.
+`vocab.sync notify` 가 없으면 복습할 게 있어도 알림이 가지 않는다 — 앱을 직접 연다.
 
 `.venv/bin/python` 을 쓴다. 어휘 후보 선정에 `wordfreq` 가, 저장소에 `sqlalchemy` 가
 필요하기 때문이다. 시스템 파이썬으로 돌리면 `analyzer.py` 가 조용히 예전 선정 방식으로
