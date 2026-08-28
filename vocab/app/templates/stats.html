@@ -23,7 +23,7 @@
         {% set pct = (pair[0] * 100) | round | int %}
         <li>
           <span class="bar-label">{{ stage }}</span>
-          <span class="bar"><i style="width: {{ pct }}%"></i></span>
+          <span class="meter"><i style="width: {{ pct }}%"></i></span>
           <span class="bar-value">{{ pct }}% <small>({{ pair[1] }})</small></span>
         </li>
       {% endfor %}

@@ -689,8 +689,8 @@ def manifest():
             "short_name": "단어",
             "start_url": "/",
             "display": "standalone",
-            "background_color": "#faf9f6",
-            "theme_color": "#2c6a5c",
+            "background_color": "#f2f4f8",
+            "theme_color": "#4338ca",
             "icons": [
                 {"src": "/static/icon.svg", "sizes": "any", "type": "image/svg+xml",
                  "purpose": "any maskable"}
