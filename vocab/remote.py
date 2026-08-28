@@ -6,20 +6,24 @@
 (서버 컨테이너 자체는 이 맥에서 도니 맥이 꺼져 있으면 안 된다. 없어지는 것은 손이지
 장비가 아니다.)
 
-옮길 수 있는 것과 없는 것이 갈린다.
+보내는 방법이 둘이고, **노트 쪽이 주(主)다.**
 
-- **후보 선정은 옮겨진다.** 규칙(빈도 밴드 + 전사문 내 반복 횟수)이라 재현 가능하고,
-  `vocab.candidates` 를 그대로 쓴다. 팟캐스트와 같은 코드가 같은 기준으로 고른다.
-- **뜻은 못 옮긴다.** LLM 자격증명이 맥에만 있다. 그래서 뜻을 비워서 보내고,
-  서버는 그 어휘를 카드로 만들지 않은 채 `/api/tasks` 에 쌓는다. 맥에서
-  `python -m vocab.tutor` 가 돌 때 채워지고, 그때부터 출제된다.
+- **`--note` — 수업 노트를 그대로 올린다.** `english-class` 스킬이 그 PC 에서 노트를
+  쓰고 있다면 뜻·예문·교정이 이미 다 들어 있다. 그걸 만든 것도 그 PC 의 Claude 다.
+  표를 읽는 규칙은 `vocab.notes` 에 있고 맥의 `collect` 와 같은 코드다.
+- **`--transcript` / `--audio` — 전사문에서 후보를 뽑는다.** 노트에 담기지 않은,
+  전사문에서 반복된 낱말을 줍는 보조 경로다. 선정 규칙(빈도 밴드 + 반복 횟수)은
+  `vocab.candidates` 를 그대로 쓴다. 다만 **뜻을 쓸 수는 없다** — 규칙과 달리 뜻은
+  LLM 이 필요하고, 이 경로는 사람이 부르는 자리가 아니다. 그래서 뜻을 비워 보내고
+  서버는 카드로 만들지 않은 채 쌓아 둔다. 맥에서 `vocab.tutor` 가 채우면 출제된다.
 
+    python -m vocab.remote --note "영어수업 2026-08-28.md"
+    python -m vocab.remote --note "영어수업 2026-08-28.md" --dry-run
     python -m vocab.remote --transcript transcript.md
-    python -m vocab.remote --transcript transcript.md --dry-run
     python -m vocab.remote --audio class.mkv          # faster-whisper 가 있으면 전사부터
 
-이 PC 에 필요한 것은 `wordfreq simplemma requests python-dotenv` 넷뿐이다. sqlalchemy 도
-DB 도 필요 없다 — 저장소는 서버에 있고, 여기서는 만들지 않는다.
+이 PC 에 필요한 것은 `wordfreq simplemma requests` 셋뿐이다. sqlalchemy 도 DB 도 필요
+없다 — 저장소는 서버에 있고, 여기서는 만들지 않는다.
 
 **닿는 길.** 게이트웨이(Traefik)가 이미 `stueng.deepheart.duckdns.org` 를 정식 인증서로
 서비스하고 있고, 443 은 LAN 에도 열려 있다. 공유기가 헤어핀 NAT 을 지원하지 않아 집
@@ -48,15 +52,17 @@ import sys
 
 import requests
 
-from . import banding, candidates
+from . import banding, candidates, notes
 
 logger = logging.getLogger(__name__)
 
 # `models` 를 가져오지 않는다. 그쪽은 sqlalchemy 를 끌고 오는데 이 PC 에는 DB 가 없다.
-# 필요한 것은 문자열 셋뿐이라 적어 두고, 어긋나면 test_vocab_remote 가 잡는다.
+# 종류 문자열 둘은 여기 적어 두고, 어긋나면 test_vocab_remote 가 잡는다. 출처 문자열은
+# 노트 파서가 이미 들고 있으니 거기서 가져온다.
 KIND_WORD = "word"
 KIND_EXPRESSION = "expression"
-SOURCE_CLASS = "class"
+SOURCE_CLASS = notes.SOURCE_CLASS
+SOURCE_CORRECTION = notes.SOURCE_CORRECTION
 
 #: 한 수업에서 뽑을 후보 수. 수업 하나는 팟캐스트 한 편보다 어휘 밀도가 낮고, 하루
 #: 새 카드가 10장이라 그보다 조금 많게 잡는다.
@@ -168,6 +174,41 @@ def examples_for(word: str, pool: list[str]) -> list[str]:
     return found
 
 
+def handled() -> set[str]:
+    """이미 학습 중이거나 안다고 표시한 표제어. 서버에 직접 묻는다.
+
+    `candidates.already_handled()` 를 쓰지 않는 이유: 그쪽은 `config` 를 거쳐
+    `VOCAB_INGEST_TOKEN`(넓은 토큰)으로 묻는데, 이 PC 에는 좁은 토큰만 있다. 게다가
+    실패를 `logger.debug` 로만 남기고 로컬 저장소로 물러나는데, 여기엔 저장소가 없어
+    **빈 집합**이 된다 — 이미 외우는 단어가 후보 자리를 조용히 차지한다.
+    """
+    url, token = _server()
+    try:
+        response = requests.get(
+            f"{url}/api/handled", headers={"X-Ingest-Token": token}, timeout=TIMEOUT
+        )
+    except requests.RequestException as e:
+        logger.warning("학습 상태를 못 받았습니다 (%s) — 이미 아는 단어가 섞일 수 있습니다", e)
+        return set()
+
+    if not response.ok:
+        logger.warning(
+            "학습 상태를 거부당했습니다 (%s) — 이미 아는 단어가 섞일 수 있습니다. "
+            "VOCAB_REMOTE_TOKEN 이 서버의 값과 같은지 확인하세요.",
+            response.status_code,
+        )
+        return set()
+
+    try:
+        words = {w.lower() for w in response.json()["headwords"]}
+    except (ValueError, KeyError, TypeError) as e:
+        logger.warning("학습 상태를 해석하지 못했습니다 (%s)", e)
+        return set()
+
+    logger.info("이미 다루는 표제어 %d개를 후보에서 뺍니다", len(words))
+    return words
+
+
 def build(
     transcript: str,
     *,
@@ -177,7 +218,7 @@ def build(
     limit: int = DEFAULT_LIMIT,
 ) -> list[dict]:
     """전사문 → `/ingest` 페이로드. 뜻은 비운다."""
-    words = candidates.for_episode(transcript, limit=limit)
+    words = candidates.from_transcript(transcript, limit=limit, exclude=handled())
     if not words:
         return []
 
@@ -190,20 +231,45 @@ def build(
 
     entries = []
     for word in words:
-        found = examples_for(word, pool) or [None]
-        for sentence in found:
-            entries.append({
+        for sentence in examples_for(word, pool) or [None]:
+            entries.append(_payload({
                 "display": word,
-                # 서버가 표기 형태로 다시 정한다(`collect.Entry.__post_init__`). 여기서
-                # 맞춰 보내는 것은 페이로드를 혼자 읽어도 말이 되게 하려는 것뿐이다.
-                "kind": KIND_EXPRESSION if banding.is_phrase(word) else KIND_WORD,
-                "meaning_kr": "",
+                "meaning_kr": "",  # 뜻은 맥의 `vocab.tutor` 가 채운다
+                "sentence": sentence,
                 "source_kind": SOURCE_CLASS,
                 "source_title": title,
-                "occurred_on": occurred_on.isoformat(),
-                "sentence": sentence,
-            })
+                "occurred_on": occurred_on,
+            }))
     return entries
+
+
+def _payload(row: dict) -> dict:
+    """`notes` 가 준 dict 를 `/ingest` 페이로드로. 날짜만 문자열로 바꾼다."""
+    display = row["display"]
+    return {
+        "display": display,
+        # 서버가 표기 형태로 다시 정한다(`collect.Entry.__post_init__`). 여기서 맞춰
+        # 보내는 것은 페이로드를 혼자 읽어도 말이 되게 하려는 것뿐이다.
+        "kind": KIND_EXPRESSION if banding.is_phrase(display) else KIND_WORD,
+        "meaning_kr": row.get("meaning_kr", ""),
+        "usage_note": row.get("usage_note"),
+        "sentence": row.get("sentence"),
+        "source_kind": row["source_kind"],
+        "source_title": row["source_title"],
+        "occurred_on": row["occurred_on"].isoformat(),
+    }
+
+
+def build_from_note(path: str) -> list[dict]:
+    """수업 노트 → 페이로드. 뜻이 이미 있으므로 뜻 대기열을 거치지 않는다."""
+    rows = notes.parse_file(path)
+    if not rows:
+        raise RemoteError(
+            f"노트에서 어휘를 읽지 못했습니다: {path}\n"
+            "파일 이름이 '영어수업 YYYY-MM-DD.md' 형식이어야 하고, "
+            "'새 단어·표현' 또는 '교정' 표가 있어야 합니다."
+        )
+    return [_payload(row) for row in rows]
 
 
 def send(entries: list[dict]) -> dict:
@@ -245,9 +311,10 @@ def transcribe(path: str, *, model: str = "small") -> str:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
-        description="수업 전사문에서 어휘 후보를 뽑아 복습 서버로 보낸다"
+        description="수업 노트나 전사문에서 어휘를 뽑아 복습 서버로 보낸다"
     )
     source = parser.add_mutually_exclusive_group(required=True)
+    source.add_argument("--note", help="수업 노트 '영어수업 YYYY-MM-DD.md' (뜻·교정 포함)")
     source.add_argument("--transcript", help="전사문 파일 (.md/.txt)")
     source.add_argument("--audio", help="녹음 파일 — faster-whisper 로 여기서 전사한다")
     parser.add_argument("--date", help="수업 날짜 YYYY-MM-DD (기본: 오늘)")
@@ -269,25 +336,32 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     try:
-        if args.audio:
-            transcript = transcribe(args.audio, model=args.model)
+        if args.note:
+            entries = build_from_note(args.note)
         else:
-            with open(args.transcript, encoding="utf-8") as f:
-                transcript = f.read()
-
-        entries = build(
-            transcript,
-            occurred_on=occurred_on,
-            tutor=args.tutor,
-            topic=args.topic,
-            limit=args.limit,
-        )
-        if not entries:
-            print("후보가 없습니다. 전사문이 비었거나, 나온 낱말이 모두 이미 다루는 것입니다.")
-            return 0
+            if args.audio:
+                transcript = transcribe(args.audio, model=args.model)
+            else:
+                with open(args.transcript, encoding="utf-8") as f:
+                    transcript = f.read()
+            entries = build(
+                transcript,
+                occurred_on=occurred_on,
+                tutor=args.tutor,
+                topic=args.topic,
+                limit=args.limit,
+            )
+            if not entries:
+                print("후보가 없습니다. 전사문이 비었거나, 나온 낱말이 모두 이미 다루는 것입니다.")
+                return 0
 
         shown = sorted({e["display"] for e in entries})
-        print(f"후보 {len(shown)}개 (예문 {len(entries)}건): {', '.join(shown)}")
+        pending = sum(1 for e in entries if not e["meaning_kr"])
+        corrections = sum(1 for e in entries if e["source_kind"] == SOURCE_CORRECTION)
+        label = "어휘" if args.note else "후보"
+        print(f"{label} {len(shown)}개 (항목 {len(entries)}건"
+              + (f", 교정 {corrections}건" if corrections else "")
+              + f"): {', '.join(shown)}")
 
         if args.dry_run:
             return 0
@@ -298,7 +372,10 @@ def main(argv: list[str] | None = None) -> int:
             f"보강 {result['words_updated']}, 새 예문 {result['occurrences_created']} "
             f"(서버 총 어휘 {result['total_words']})"
         )
-        print("뜻은 비어 있습니다. 맥에서 `python -m vocab.tutor` 가 채우면 출제됩니다.")
+        if pending:
+            print(f"뜻이 빈 것 {pending}건 — 맥에서 `python -m vocab.tutor` 가 채우면 출제됩니다.")
+        else:
+            print("뜻이 다 있어 바로 출제 대상입니다.")
         return 0
 
     except RemoteError as e:

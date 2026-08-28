@@ -27,13 +27,14 @@ os.environ.pop("VOCAB_ENV", None)
 from fastapi.testclient import TestClient  # noqa: E402
 from sqlalchemy import delete, select  # noqa: E402
 
-from vocab import candidates, compose, remote, study  # noqa: E402
+from vocab import compose, remote, study  # noqa: E402
 from vocab.app import main, security  # noqa: E402
 from vocab.models import (  # noqa: E402
     KIND_EXPRESSION,
     KIND_WORD,
     PENDING_GLOSS,
     SOURCE_CLASS,
+    SOURCE_CORRECTION,
     Card,
     Composition,
     Occurrence,
@@ -65,6 +66,13 @@ def fresh_client():
             session.execute(delete(model))
         session.commit()
     return TestClient(main.app)
+
+
+def _remote_env(**overrides):
+    env = {"VOCAB_SERVER_URL": "https://stueng.deepheart.duckdns.org",
+           "VOCAB_REMOTE_TOKEN": "remote-secret", "VOCAB_INGEST_TOKEN": ""}
+    env.update(overrides)
+    return patch.dict(os.environ, env, clear=False)
 
 
 def _entry(display, meaning="", sentence=None):
@@ -110,7 +118,7 @@ def test_examples_match_inflected_forms():
 
 
 def test_build_sends_words_without_meanings():
-    with patch.object(candidates, "already_handled", return_value=set()):
+    with patch.object(remote, "handled", return_value=set()):
         entries = remote.build(TRANSCRIPT, occurred_on=TODAY, tutor="Anna", limit=5)
 
     assert entries, "후보가 하나도 안 나왔다"
@@ -126,14 +134,14 @@ def test_build_sends_words_without_meanings():
 
 def test_build_respects_what_the_server_already_handles():
     """이미 외우는 중인 단어를 원격이 다시 올리면 안 된다."""
-    with patch.object(candidates, "already_handled", return_value={"capitulate"}):
+    with patch.object(remote, "handled", return_value={"capitulate"}):
         entries = remote.build(TRANSCRIPT, occurred_on=TODAY, limit=5)
     assert "capitulate" not in {e["display"] for e in entries}
 
 
 def test_build_keeps_the_word_even_with_no_usable_sentence():
     """예문이 없다고 어휘를 버리지 않는다. 뜻은 나중에 붙는다."""
-    with patch.object(candidates, "already_handled", return_value=set()), \
+    with patch.object(remote, "handled", return_value=set()), \
          patch.object(remote, "sentences", return_value=[]):
         entries = remote.build(TRANSCRIPT, occurred_on=TODAY, limit=3)
     assert entries
@@ -238,6 +246,137 @@ def test_gloss_queue_is_ordered_and_carries_examples():
     assert by_display["jurisdiction"]["examples"] == []
 
 
+def test_handled_failure_is_loud_not_silent():
+    """조용히 빈 집합으로 물러나면 이미 외우는 단어가 후보 자리를 차지한다."""
+    class Refused:
+        ok = False
+        status_code = 401
+
+    with _remote_env(), patch.object(remote.requests, "get", return_value=Refused()), \
+         patch.object(remote.logger, "warning") as warn:
+        assert remote.handled() == set()
+    assert warn.called, "거부당하고도 아무 말이 없으면 안 된다"
+
+
+def test_handled_uses_the_narrow_token():
+    """넓은 토큰을 쓰면 이 PC 에 둘 이유가 없는 권한을 쓰는 것이다."""
+    class Ok:
+        ok = True
+        @staticmethod
+        def json():
+            return {"headwords": ["Capitulate"]}
+
+    with _remote_env(), patch.object(remote.requests, "get", return_value=Ok()) as get:
+        assert remote.handled() == {"capitulate"}
+    assert get.call_args.kwargs["headers"]["X-Ingest-Token"] == "remote-secret"
+    assert get.call_args.args[0].endswith("/api/handled")
+
+
+def test_the_narrow_token_can_read_handled_words():
+    """서버가 이 경로를 열어 주지 않으면 위 조회가 매번 401 로 물러난다."""
+    client = fresh_client()
+    assert client.get("/api/handled", headers=REMOTE_HEADERS).status_code == 200
+
+
+# --------------------------------------------------------------------------
+# 수업 노트 경로 — 뜻이 이미 있는 쪽
+# --------------------------------------------------------------------------
+
+NOTE = """# 영어수업 2026-08-28
+
+- 튜터: Anna
+- 주제: job interview
+
+## 내 표현 교정
+
+| 내가 한 말 | 자연스러운 표현 | 왜 |
+| --- | --- | --- |
+| I am working there since 2020 | I have been working there since 2020 | since 는 현재완료와 쓴다 |
+
+## 새 단어·표현
+
+| 표현 | 뜻 | 예문 |
+| --- | --- | --- |
+| capitulate | 굴복하다 | They capitulated after negotiations. |
+| take on | (일을) 맡다 | I'd love to take on more responsibility. |
+| | | |
+"""
+
+
+def _note_file():
+    path = Path(_TMP) / "영어수업 2026-08-28.md"
+    path.write_text(NOTE, encoding="utf-8")
+    return path
+
+
+def test_note_entries_arrive_with_meanings():
+    """노트 경로는 뜻 대기열을 거치지 않는다. 그 PC 의 Claude 가 이미 썼다."""
+    entries = remote.build_from_note(str(_note_file()))
+    assert entries
+    for entry in entries:
+        assert entry["meaning_kr"], entry
+        assert entry["source_title"] == "영어수업 2026-08-28 · Anna · job interview"
+        assert entry["occurred_on"] == "2026-08-28"
+
+
+def test_note_keeps_corrections_apart_from_new_words():
+    """교정은 출처가 달라야 한다. 출제 순서에서 가장 먼저 오는 재료다."""
+    by_display = {e["display"]: e for e in remote.build_from_note(str(_note_file()))}
+    correction = by_display["I have been working there since 2020"]
+    assert correction["source_kind"] == SOURCE_CORRECTION
+    assert correction["usage_note"] == "내가 한 말: I am working there since 2020"
+    assert by_display["capitulate"]["source_kind"] == SOURCE_CLASS
+
+
+def test_note_kind_follows_the_written_form():
+    by_display = {e["display"]: e for e in remote.build_from_note(str(_note_file()))}
+    assert by_display["capitulate"]["kind"] == KIND_WORD
+    assert by_display["take on"]["kind"] == KIND_EXPRESSION
+
+
+def test_empty_template_rows_are_dropped():
+    """스킬 템플릿이 남기는 빈 행이 어휘가 되면 안 된다."""
+    displays = {e["display"] for e in remote.build_from_note(str(_note_file()))}
+    assert "" not in displays
+    assert len(displays) == 3
+
+
+def test_a_misnamed_note_stops_loudly():
+    """날짜를 못 읽으면 조용히 0건을 보내는 대신 멈춘다."""
+    path = Path(_TMP) / "수업메모.md"
+    path.write_text(NOTE, encoding="utf-8")
+    try:
+        remote.build_from_note(str(path))
+    except remote.RemoteError as e:
+        assert "영어수업 YYYY-MM-DD" in str(e)
+    else:
+        raise AssertionError("이름 규칙이 틀리면 멈춰야 한다")
+
+
+def test_the_note_lands_on_the_server_ready_to_study():
+    """노트로 들어온 어휘는 뜻이 있으므로 바로 카드가 된다."""
+    client = fresh_client()
+    entries = remote.build_from_note(str(_note_file()))
+    assert client.post("/ingest", json={"entries": entries},
+                       headers=REMOTE_HEADERS).status_code == 200
+
+    with main.Session_() as session:
+        assert compose.words_without_gloss(session) == [], "뜻 대기열에 남으면 안 된다"
+        assert len(study.introduce(session, 10)) > 0
+
+
+def test_the_mac_and_the_pc_read_the_note_the_same_way():
+    """규칙이 두 벌이 되면 어느 한쪽만 고치는 날이 온다. 같은 코드임을 고정한다."""
+    from vocab import collect as collect_mod
+
+    path = _note_file()
+    mac = collect_mod.parse_class_note(path)
+    pc = remote.build_from_note(str(path))
+    assert [e.display for e in mac] == [e["display"] for e in pc]
+    assert [e.meaning_kr for e in mac] == [e["meaning_kr"] for e in pc]
+    assert [e.source_kind for e in mac] == [e["source_kind"] for e in pc]
+
+
 # --------------------------------------------------------------------------
 # 토큰 범위 — 수업 PC 가 가진 열쇠로 무엇을 열 수 있나
 # --------------------------------------------------------------------------
@@ -253,7 +392,8 @@ def test_remote_token_can_push_vocabulary():
 def test_remote_token_cannot_read_anything():
     """수업 PC 의 토큰이 새도 복습 기록은 넘어가지 않아야 한다."""
     client = fresh_client()
-    for path in ("/api/export", "/api/tasks", "/api/progress", "/api/handled"):
+    # /api/handled 는 뺄 목록이라 의도적으로 열려 있다. 나머지는 닫혀야 한다.
+    for path in ("/api/export", "/api/tasks", "/api/progress"):
         response = client.get(path, headers=REMOTE_HEADERS)
         assert response.status_code == 401, f"{path} 가 {response.status_code} 로 열렸다"
 
@@ -294,13 +434,6 @@ def test_ingest_is_unavailable_when_no_token_is_configured():
 # --------------------------------------------------------------------------
 # 전송 경로 — 토큰이 평문으로 나가지 않는가
 # --------------------------------------------------------------------------
-
-
-def _remote_env(**overrides):
-    env = {"VOCAB_SERVER_URL": "https://stueng.deepheart.duckdns.org",
-           "VOCAB_REMOTE_TOKEN": "remote-secret", "VOCAB_INGEST_TOKEN": ""}
-    env.update(overrides)
-    return patch.dict(os.environ, env, clear=False)
 
 
 def test_plain_http_is_refused():
@@ -350,6 +483,16 @@ if __name__ == "__main__":
         test_a_real_meaning_is_never_overwritten_by_the_worker,
         test_a_later_note_fills_the_meaning_the_remote_left_empty,
         test_gloss_queue_is_ordered_and_carries_examples,
+        test_handled_failure_is_loud_not_silent,
+        test_handled_uses_the_narrow_token,
+        test_the_narrow_token_can_read_handled_words,
+        test_note_entries_arrive_with_meanings,
+        test_note_keeps_corrections_apart_from_new_words,
+        test_note_kind_follows_the_written_form,
+        test_empty_template_rows_are_dropped,
+        test_a_misnamed_note_stops_loudly,
+        test_the_note_lands_on_the_server_ready_to_study,
+        test_the_mac_and_the_pc_read_the_note_the_same_way,
         test_remote_token_can_push_vocabulary,
         test_remote_token_cannot_read_anything,
         test_remote_token_cannot_write_worker_results,

@@ -5,6 +5,8 @@
 1. `data/<날짜>.json`                  — Up First 일일 분석
 2. `data/weekly/planetmoney-*.json`    — Planet Money 주간 학습 계획
 3. `~/mylogs/study/영어수업 *.md`       — english-class 스킬이 만든 수업 노트
+                                          (표를 읽는 규칙은 `notes` 에 있다. 수업 PC 의
+                                           `remote` 도 같은 코드를 쓴다.)
 
 멱등하다. 같은 파일을 몇 번 돌려도 어휘는 (표제어, 종류) 로, 예문은 (어휘, 문장) 로
 합쳐진다. 새 예문이 붙으면 그만큼 문맥이 쌓인다.
@@ -27,14 +29,12 @@ from pathlib import Path
 from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
-from . import banding
+from . import banding, notes
 from .db import REPO_ROOT, create_all, make_engine, session_factory
 from .models import (
     Card,
     KIND_EXPRESSION,
     KIND_WORD,
-    SOURCE_CLASS,
-    SOURCE_CORRECTION,
     SOURCE_PLANETMONEY,
     SOURCE_UPFIRST,
     Occurrence,
@@ -50,7 +50,6 @@ WEEKLY_DIR = DATA_DIR / "weekly"
 CLASS_NOTES_DIR = Path.home() / "mylogs" / "study"
 
 DAILY_FILE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}\.json$")
-CLASS_NOTE_RE = re.compile(r"^영어수업 (\d{4}-\d{2}-\d{2})(?: \((\d+)\))?\.md$")
 
 SOURCE_BY_NAME = {
     "up first": SOURCE_UPFIRST,
@@ -208,97 +207,14 @@ def parse_weekly(path: Path) -> list[Entry]:
     return entries
 
 
-def _markdown_tables(body: str) -> dict[str, list[list[str]]]:
-    """`## 제목` 아래에 붙은 파이프 표를 제목별로 모은다.
-
-    구분선(`| --- |`)과 빈 셀만 있는 행은 버린다. 템플릿이 빈 표를 남기기 때문이다.
-    """
-    tables: dict[str, list[list[str]]] = {}
-    heading = ""
-    for line in body.splitlines():
-        stripped = line.strip()
-        if stripped.startswith("#"):
-            heading = stripped.lstrip("#").strip()
-            continue
-        if not stripped.startswith("|"):
-            continue
-        cells = [c.strip() for c in stripped.strip("|").split("|")]
-        if not any(cells):
-            continue
-        if all(set(c) <= {"-", ":", " "} for c in cells if c):
-            continue
-        tables.setdefault(heading, []).append(cells)
-    return tables
-
-
 def parse_class_note(path: Path) -> list[Entry]:
-    match = CLASS_NOTE_RE.match(path.name)
-    if not match:
-        return []
-    occurred_on = dt.date.fromisoformat(match.group(1))
+    """수업 노트 → 어휘. 표를 읽는 규칙은 `notes` 에 있다.
 
-    body = path.read_text(encoding="utf-8")
-    tutor = ""
-    topic = ""
-    for line in body.splitlines()[:20]:
-        if line.startswith("- 튜터:"):
-            tutor = _clean(line.split(":", 1)[1])
-        elif line.startswith("- 주제:"):
-            topic = _clean(line.split(":", 1)[1])
-
-    title = " · ".join(x for x in [f"영어수업 {occurred_on:%Y-%m-%d}", tutor, topic] if x)
-    tables = _markdown_tables(body)
-    entries: list[Entry] = []
-
-    for heading, rows in tables.items():
-        if ("새 단어" in heading or "표현" in heading) and "교정" not in heading:
-            # | 표현 | 뜻 | 예문 |
-            for cells in rows[1:] if _is_header(rows[0], ("표현", "뜻")) else rows:
-                if len(cells) < 2:
-                    continue
-                display, meaning = _clean(cells[0]), _clean(cells[1])
-                if not display or not meaning:
-                    continue
-                entries.append(
-                    Entry(
-                        display=display,
-                        kind=KIND_EXPRESSION if " " in display else KIND_WORD,
-                        meaning_kr=meaning,
-                        sentence=_clean(cells[2]) if len(cells) > 2 else None,
-                        source_kind=SOURCE_CLASS,
-                        source_title=title,
-                        occurred_on=occurred_on,
-                    )
-                )
-
-        elif "교정" in heading:
-            # | 내가 한 말 | 자연스러운 표현 | 왜 |
-            for cells in rows[1:] if _is_header(rows[0], ("내가", "자연")) else rows:
-                if len(cells) < 2:
-                    continue
-                said, natural = _clean(cells[0]), _clean(cells[1])
-                why = _clean(cells[2]) if len(cells) > 2 else ""
-                if not natural:
-                    continue
-                entries.append(
-                    Entry(
-                        display=natural,
-                        kind=KIND_EXPRESSION if " " in natural else KIND_WORD,
-                        meaning_kr=why or f"'{said}' 대신 쓰는 자연스러운 표현",
-                        usage_note=f"내가 한 말: {said}" if said else None,
-                        sentence=natural,
-                        source_kind=SOURCE_CORRECTION,
-                        source_title=title,
-                        occurred_on=occurred_on,
-                    )
-                )
-
-    return entries
-
-
-def _is_header(cells: list[str], needles: tuple[str, ...]) -> bool:
-    joined = " ".join(cells)
-    return any(n in joined for n in needles)
+    파서를 그쪽에 둔 이유는 수업이 다른 PC 에서 돌기 때문이다. 그 PC 의 `vocab.remote`
+    가 같은 노트를 읽어 서버로 바로 보내는데, 규칙이 두 벌이면 어느 한쪽만 고치는 날이
+    온다.
+    """
+    return [Entry(kind=KIND_WORD, **row) for row in notes.parse_file(path)]
 
 
 # --------------------------------------------------------------------------

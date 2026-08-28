@@ -179,6 +179,9 @@ scp <녹화파일> dysim@192.168.45.93:~/Movies/english-class/inbox/
 ~/workspace/stueng/skills/english-class/scripts/session.sh close
 ```
 
+**노트를 서버로 보낸 뒤에 `close` 한다** (→ "수업 PC 에서 바로 보내기"). 이 PC 에서
+돌고 있다면 노트가 여기 남을 뿐 복습 앱으로 가지 않는다.
+
 저장 경로와 함께 교정 몇 건·새 표현 몇 개·질문 몇 건을 뽑았는지 한 줄로 알린다.
 가져온 녹화(`inbox/` 원본과 쪼갠 m4a)는 `~/Movies/english-class/` 에 그대로 남는다. 지우지 않는다 — 나중에 다시 들어볼 수
 있어야 하고, 지울지는 사용자가 정할 일이다. 용량이 쌓이면 정리할 수 있다고만 알려준다.
@@ -209,27 +212,42 @@ IP 가 바뀌었으면 맥에서 `ipconfig getifaddr en0` 로 다시 확인한�
 
 ## 수업 PC 에서 바로 보내기
 
-위 흐름은 맥이 노트를 쓴다. 그게 어휘의 질은 가장 좋지만(교정 표까지 나온다) 수업마다
-맥에서 손을 대야 한다. **손을 안 대는 길**도 있다 — 그 PC 가 전사·후보 추출까지 하고
-서버로 바로 밀어 넣는다.
+**이 스킬이 그 PC 에서 돌고 있다면 C-3 에서 쓴 노트가 거기 쌓인다.** 맥의
+`vocab.collect` 는 맥의 폴더만 훑으므로, 그 노트는 그냥 두면 아무 데도 가지 않는다.
+`close` 직전에 한 줄 보내면 된다.
 
 ```bash
-python -m vocab.remote --transcript transcript.md --tutor Anna
-python -m vocab.remote --audio class.mkv --model small   # 전사부터 그 PC 에서
-python -m vocab.remote --transcript transcript.md --dry-run
+python -m vocab.remote --note "~/mylogs/study/영어수업 2026-08-28.md"
+python -m vocab.remote --note "..." --dry-run      # 무엇이 갈지만 본다
 ```
 
-**옮겨지는 것과 안 옮겨지는 것이 갈린다.** 후보 선정은 규칙(빈도 밴드 + 전사문 내 반복
-횟수)이라 그 PC 에서도 같은 코드가 같은 답을 낸다. 뜻은 LLM 이 필요하고 자격증명은
-맥에만 있다. 그래서 **뜻을 비운 채 보내고**, 서버는 그 어휘를 카드로 만들지 않은 채
-쌓아 둔다. 맥에서 `python -m vocab.tutor` 가 돌 때 뜻이 채워지고, 그때부터 출제된다.
-밀려도 빈 문제가 나가지는 않는다 — 새 카드가 늦어질 뿐이다.
+**뜻·예문·교정이 이미 다 들어 있다.** 그 노트를 쓴 것이 이 PC 의 Claude 이기 때문이다.
+표를 읽는 규칙은 `vocab.notes` 에 있고 맥의 `collect` 와 **같은 코드**라, 두 경로로
+들어와도 결과가 어긋나지 않는다. 교정 표는 `correction` 출처로 따로 들어가는데,
+출제 순서에서 가장 먼저 오는 재료다.
+
+### 노트에 안 담긴 것까지 줍고 싶으면
+
+전사문에서 반복된 낱말을 빈도 기준으로 뽑는 보조 경로가 있다.
+
+```bash
+python -m vocab.remote --transcript "~/mylogs/study/.session/transcript.md"
+python -m vocab.remote --audio class.mkv --model small   # 전사부터 여기서
+```
+
+이쪽은 **뜻을 비운 채** 간다. 후보 선정은 규칙(빈도 밴드 + 반복 횟수)이라 옮겨지지만,
+뜻은 LLM 이 필요하고 이건 사람이 부르는 자리가 아니다. 서버는 그 어휘를 카드로 만들지
+않은 채 쌓아 두고, 맥에서 `python -m vocab.tutor` 가 돌 때 채워져 출제된다. 밀려도 빈
+문제가 나가지는 않는다 — 새 카드가 늦어질 뿐이다.
+
+로그에 "학습 상태를 못 받았습니다" 또는 "거부당했습니다" 가 뜨면 **멈추고 토큰을
+확인한다.** 그게 뜬 채로 돌면 이미 외우는 중인 단어가 후보 자리를 차지한다.
 
 그 PC 준비:
 
 ```bash
 git clone <이 저장소> stueng && cd stueng
-pip install wordfreq simplemma requests python-dotenv
+pip install wordfreq simplemma requests
 pip install faster-whisper            # --audio 를 쓸 때만
 
 export VOCAB_SERVER_URL=https://stueng.deepheart.duckdns.org
@@ -269,6 +287,9 @@ export VOCAB_REMOTE_TOKEN=<게이트웨이 .env 의 VOCAB_REMOTE_TOKEN>
 ```bash
 grep VOCAB_REMOTE_TOKEN ~/workspace/deepheart-gw/.env
 ```
+
+좁은 토큰이 여는 것은 `/ingest`(어휘 넣기)와 `/api/handled`(이미 다루는 표제어 목록,
+후보에서 뺄 것) 둘뿐이다. `/api/export`·`/api/tasks`·`/api/progress` 는 401 이다.
 
 `vocab.remote` 는 좁은 토큰을 먼저 찾고, 없으면 넓은 것으로 돌아가되 경고를 남긴다.
 평문 HTTP 주소로는 아예 보내지 않는다 — 토큰이 그대로 나가기 때문이다.

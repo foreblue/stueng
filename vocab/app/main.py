@@ -641,8 +641,12 @@ def api_handled(request: Request, session: DB):
 
     로컬 파이프라인이 새 어휘 후보를 고를 때 뺄 목록이다. 카드가 서버로 옮겨간 뒤로
     로컬만 보고는 알 수 없게 됐다.
+
+    좁은 토큰(수업 PC)도 받는다. 이걸 못 부르면 이미 외우는 중인 단어가 후보 자리를
+    차지하는데, 그 실패가 조용해서 몇 주씩 이어질 수 있다. 나가는 것은 표제어 목록뿐
+    으로 뜻도 복습 기록도 없고, 애초에 그 PC 가 보낸 어휘가 대부분이다.
     """
-    security.require_ingest_token(request)
+    security.require_ingest_token(request, remote_ok=True)
     rows = session.execute(
         select(Word.headword).where(
             Word.known.is_(True)

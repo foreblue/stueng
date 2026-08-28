@@ -44,14 +44,17 @@ messenger.py     텔레그램 알림    ←──   /api/progress
 1. **맥이 노트를 쓴다.** 그 PC 가 오디오 트랙 두 개(강사/나)로 녹음해
    `~/Movies/english-class/inbox/` 로 `scp` 하면 `import.sh` 가 맥 녹음과 같은 형태로
    쪼갠다. 그 뒤 전사·노트·수집은 종전 그대로다. 교정 표까지 나오니 어휘의 질이 가장 좋다.
-2. **그 PC 가 직접 보낸다.** `python -m vocab.remote` 가 전사문에서 후보를 뽑아
-   `/ingest` 로 밀어 넣는다. 맥에서 손을 댈 일이 없다.
+2. **그 PC 가 직접 보낸다.** `english-class` 스킬이 그 PC 에서 돌고 있으면 노트도 거기
+   쌓인다. `python -m vocab.remote --note <노트>` 가 그것을 `/ingest` 로 밀어 넣는다.
+   **뜻·예문·교정이 이미 들어 있다** — 노트를 쓴 것이 그 PC 의 Claude 이기 때문이다.
+   표를 읽는 규칙은 `vocab.notes` 한 곳에 있고 `collect` 와 같은 코드다.
 
-둘째 길에서 갈리는 지점이 하나 있다. **후보 선정은 옮겨지지만 뜻은 못 옮긴다** — 선정은
-빈도 규칙이라 같은 코드가 같은 답을 내지만, 뜻을 쓰는 데는 LLM 이 필요하고 자격증명은
-맥에만 있다. 그래서 뜻을 비운 채 보내고, 서버는 그 어휘를 **카드로 만들지 않은 채** 쌓아
-둔다(`study._new_word_query` 가 막는다). 맥에서 `vocab.tutor` 가 돌 때 채워지고 그때부터
-출제된다. 워커가 며칠 밀려도 빈 문제가 나가지 않고 새 카드만 늦어진다.
+둘째 길에는 보조 경로가 하나 더 있다. `--transcript` / `--audio` 는 전사문에서 반복된
+낱말을 빈도 기준으로 줍는데, 여기서 **선정은 옮겨지지만 뜻은 못 옮긴다** — 규칙과 달리
+뜻에는 LLM 이 필요하고 자격증명은 맥에만 있다. 그래서 뜻을 비운 채 보내고, 서버는 그
+어휘를 **카드로 만들지 않은 채** 쌓아 둔다(`study._new_word_query` 가 막는다). 맥에서
+`vocab.tutor` 가 돌 때 채워지고 그때부터 출제된다. 워커가 며칠 밀려도 빈 문제가 나가지
+않고 새 카드만 늦어진다.
 
 두 길은 배타적이지 않다. 표제어가 겹치면 서버가 합치고, 원격이 비워 둔 뜻은 나중에 들어온
 수업 노트가 채운다. 자세한 설정은 `skills/english-class/SKILL.md`.
@@ -93,9 +96,10 @@ VOCAB_PASSWORD=dev VOCAB_INGEST_TOKEN=dev \
 수업 PC 에서 (이 저장소를 clone 해 두고, hosts 한 줄과 `VOCAB_REMOTE_TOKEN` 을 설정한 뒤):
 
 ```bash
-python -m vocab.remote --transcript transcript.md --tutor Anna
-python -m vocab.remote --audio class.mkv          # 전사부터 그 PC 에서
-python -m vocab.remote --transcript x.md --dry-run
+python -m vocab.remote --note "영어수업 2026-08-28.md"   # 노트 그대로 (뜻 포함)
+python -m vocab.remote --transcript transcript.md       # 전사문에서 후보 (뜻 비움)
+python -m vocab.remote --audio class.mkv                # 전사부터 그 PC 에서
+python -m vocab.remote --note "..." --dry-run
 ```
 
 ## 배포
@@ -194,7 +198,7 @@ Postgres 로 옮기려면 `requirements-app.txt` 의 `psycopg[binary]` 주석을
 | `VOCAB_SERVER_URL` | 로컬 | 배포된 서버 주소 |
 | `VOCAB_APP_URL` | 로컬 | 알림에 넣을 주소. 비우면 서버 주소를 쓴다 |
 | `VOCAB_INGEST_TOKEN` | 양쪽 | 기계용 API 인증. 양쪽이 같아야 한다. **여섯 엔드포인트를 다 연다 — `/api/export` 포함** |
-| `VOCAB_REMOTE_TOKEN` | 서버 + 수업 PC | `/ingest` 에서만 통하는 좁은 토큰. 비우면 없는 것으로 동작한다 |
+| `VOCAB_REMOTE_TOKEN` | 서버 + 수업 PC | `/ingest` 와 `/api/handled` 만 여는 좁은 토큰. 비우면 없는 것으로 동작한다 |
 | `VOCAB_DB_URL` | 양쪽 | 비우면 로컬 `data/vocab.db` |
 | `VOCAB_ENV` | 서버 | `production` 이어야 한다. 아니면 세션 쿠키에서 `Secure` 가 빠지고 설정 누락 검사도 꺼진다 |
 | `VOCAB_PASSWORD` | 서버 | 로그인 비밀번호 |
