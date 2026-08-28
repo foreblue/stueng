@@ -455,7 +455,10 @@ def stats(request: Request, session: DB):
 class EntryIn(BaseModel):
     display: str = Field(min_length=1, max_length=200)
     kind: str
-    meaning_kr: str = Field(min_length=1)
+    #: 비워서 보낼 수 있다. 수업 PC 는 전사문에서 후보를 고르는 데까지만 하고, 뜻은
+    #: LLM 이 있는 맥이 `/api/tasks` 로 가져가 채운다. 뜻이 빌 동안 그 어휘는 카드가
+    #: 되지 않으므로(`study._new_word_query`), 빈 문제가 출제될 일은 없다.
+    meaning_kr: str = ""
     source_kind: str
     source_title: str = ""
     occurred_on: dt.date
@@ -476,8 +479,11 @@ def ingest(request: Request, session: DB, payload: IngestIn):
 
     멱등하다. 같은 것을 다시 밀어도 어휘는 (표제어, 종류) 로, 예문은 (어휘, 문장) 으로
     합쳐진다. 로컬이 매번 전체를 보내도 되므로 증분 추적 장치가 필요 없다.
+
+    여섯 개 기계용 엔드포인트 중 좁은 토큰(`VOCAB_REMOTE_TOKEN`)을 받는 것은 여기뿐이다.
+    수업 PC 가 가진 토큰으로 `/api/export` 를 부를 수 없어야 한다.
     """
-    security.require_ingest_token(request)
+    security.require_ingest_token(request, remote_ok=True)
 
     stats = collect.Stats()
     for item in payload.entries:
@@ -542,6 +548,13 @@ def export(session: DB):
     )
 
 
+class GlossIn(BaseModel):
+    word_id: int
+    meaning_kr: str = Field(min_length=1, max_length=500)
+    meaning_en: str | None = Field(default=None, max_length=500)
+    usage_note: str | None = Field(default=None, max_length=1000)
+
+
 class MnemonicIn(BaseModel):
     word_id: int
     text: str = Field(min_length=1, max_length=2000)
@@ -553,6 +566,7 @@ class FeedbackIn(BaseModel):
 
 
 class TaskResultIn(BaseModel):
+    glosses: list[GlossIn] = Field(default_factory=list)
     mnemonics: list[MnemonicIn] = Field(default_factory=list)
     feedback: list[FeedbackIn] = Field(default_factory=list)
 
@@ -565,6 +579,11 @@ def api_tasks(request: Request, session: DB):
     """
     security.require_ingest_token(request)
     return {
+        "glosses": [
+            {"word_id": word.id, "display": word.display, "kind": word.kind,
+             "examples": [o.sentence for o in word.occurrences[:3]]}
+            for word in compose.words_without_gloss(session)
+        ],
         "mnemonics": [
             {"word_id": word.id, "display": word.display, "meaning_kr": word.meaning_kr,
              "kind": word.kind,
@@ -584,7 +603,20 @@ def api_tasks_result(request: Request, session: DB, payload: TaskResultIn):
     """로컬 워커가 돌려주는 결과."""
     security.require_ingest_token(request)
     now = study.now_utc()
-    applied = {"mnemonics": 0, "feedback": 0}
+    applied = {"glosses": 0, "mnemonics": 0, "feedback": 0}
+
+    for item in payload.glosses:
+        word = session.get(Word, item.word_id)
+        # 이미 뜻이 있으면 덮어쓰지 않는다. 그 사이에 수업 노트가 같은 표제어를 제대로
+        # 채웠을 수 있고, 사람이 쓴 뜻이 생성된 뜻보다 낫다.
+        if word is not None and not word.meaning_kr:
+            word.meaning_kr = item.meaning_kr
+            if item.meaning_en and not word.meaning_en:
+                word.meaning_en = item.meaning_en
+            if item.usage_note and not word.usage_note:
+                word.usage_note = item.usage_note
+            word.updated_at = now
+            applied["glosses"] += 1
 
     for item in payload.mnemonics:
         word = session.get(Word, item.word_id)

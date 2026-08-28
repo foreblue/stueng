@@ -465,7 +465,7 @@ def test_worker_results_land_on_the_right_rows():
         "feedback": [{"composition_id": task_id, "text": "## 고친 글\n..."}],
     }).json()
 
-    assert result == {"mnemonics": 1, "feedback": 1}
+    assert result == {"glosses": 0, "mnemonics": 1, "feedback": 1}
     with main.Session_() as session:
         assert session.get(Word, word_id).mnemonic == "기억술 훅"
         task = session.get(Composition, task_id)
@@ -482,7 +482,7 @@ def test_worker_results_ignore_rows_that_disappeared():
         "feedback": [{"composition_id": 99999, "text": "y"}],
     })
     assert result.status_code == 200
-    assert result.json() == {"mnemonics": 0, "feedback": 0}
+    assert result.json() == {"glosses": 0, "mnemonics": 0, "feedback": 0}
 
 
 def test_mnemonic_shows_only_on_leech_cards():

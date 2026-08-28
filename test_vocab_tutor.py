@@ -233,6 +233,7 @@ def test_known_words_are_not_requeued():
 
 
 TASKS = {
+    "glosses": [],
     "mnemonics": [
         {"word_id": 7, "display": "bipartisan", "meaning_kr": "양당의",
          "kind": "word", "examples": ["a bipartisan deal"]}
@@ -282,7 +283,47 @@ def test_tutor_round_trip():
     assert body["feedback"] == [{"composition_id": 3, "text": "생성된 결과"}]
     assert body["mnemonics"] == [{"word_id": 7, "text": "생성된 결과"}]
     assert post.call_args.kwargs["headers"]["X-Ingest-Token"] == "secret"
-    assert result["attempted"] == {"feedback": 1, "mnemonics": 1}
+    assert result["attempted"] == {"feedback": 1, "mnemonics": 1, "glosses": 0}
+
+
+def test_gloss_is_parsed_into_both_meanings():
+    """두 줄 형식을 읽어 뜻과 영영 정의로 가른다."""
+    import analyzer
+
+    answer = "뜻: 굴복하다, 손을 들다\n영영: to stop resisting and accept demands"
+    with patch.object(analyzer, "complete", return_value=(answer, "")):
+        item = tutor.write_gloss({"word_id": 5, "display": "capitulate", "kind": "word",
+                                  "examples": ["They capitulated."]})
+    assert item == {"word_id": 5, "meaning_kr": "굴복하다, 손을 들다",
+                    "meaning_en": "to stop resisting and accept demands"}
+
+
+def test_unreadable_gloss_is_left_empty_rather_than_invented():
+    """형식을 벗어나거나 판단불가면 건너뛴다. 다음 실행에서 다시 잡힌다."""
+    import analyzer
+
+    for answer in ("판단불가", "I think it means something like giving up."):
+        with patch.object(analyzer, "complete", return_value=(answer, "")):
+            assert tutor.write_gloss({"word_id": 5, "display": "capitulate",
+                                      "kind": "word", "examples": []}) is None
+
+
+def test_glosses_go_out_in_the_same_post():
+    """뜻·기억술·첨삭이 한 번의 POST 로 나간다."""
+    import analyzer
+
+    tasks = dict(TASKS, glosses=[{"word_id": 9, "display": "wield", "kind": "word",
+                                  "examples": ["He wields power."]}])
+    with configured(), patch.object(requests, "get", return_value=FakeResponse(tasks)), \
+         patch.object(analyzer, "complete", return_value=("뜻: 휘두르다", "")), \
+         patch.object(requests, "post",
+                      return_value=FakeResponse({"glosses": 1, "mnemonics": 1,
+                                                 "feedback": 1})) as post:
+        result = tutor.run()
+
+    body = post.call_args.kwargs["json"]
+    assert body["glosses"] == [{"word_id": 9, "meaning_kr": "휘두르다", "meaning_en": None}]
+    assert result["attempted"]["glosses"] == 1
 
 
 def test_llm_failure_skips_that_item_without_losing_the_others():
@@ -331,12 +372,13 @@ def test_composition_prompt_carries_words_and_text():
 
 def test_nothing_to_do_makes_no_post():
     with configured(), \
-         patch.object(requests, "get", return_value=FakeResponse({"mnemonics": [], "compositions": []})), \
+         patch.object(requests, "get",
+                      return_value=FakeResponse({"glosses": [], "mnemonics": [], "compositions": []})), \
          patch.object(requests, "post") as post:
         result = tutor.run()
         post.assert_not_called()
-    assert result == {"mnemonics": 0, "feedback": 0,
-                      "attempted": {"feedback": 0, "mnemonics": 0}}
+    assert result == {"glosses": 0, "mnemonics": 0, "feedback": 0,
+                      "attempted": {"feedback": 0, "mnemonics": 0, "glosses": 0}}
 
 
 def test_limit_caps_work_per_run():

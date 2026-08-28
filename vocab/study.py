@@ -33,6 +33,7 @@ from sqlalchemy.orm import Session
 from . import banding, scheduler
 from .models import (
     KIND_EXPRESSION,
+    PENDING_GLOSS,
     SOURCE_CORRECTION,
     STAGE_CLOZE,
     STAGE_PRODUCTION,
@@ -127,6 +128,9 @@ def _new_word_query():
             ~exists().where(Card.word_id == Word.id),
             Word.known.is_(False),
             Word.band.in_(banding.STUDY_BANDS),
+            # 뜻이 없으면 문제를 낼 수 없다. 원격이 후보만 보낸 어휘는 `vocab.tutor` 가
+            # 뜻을 채운 뒤에야 줄에 선다. 여기서 막지 않으면 뜻 칸이 빈 카드가 출제된다.
+            Word.meaning_kr != PENDING_GLOSS,
         )
         .order_by(
             is_correction.desc(),

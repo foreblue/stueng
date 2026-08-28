@@ -5,6 +5,12 @@
 
 로컬 파이프라인이 어휘를 밀어 넣는 `/ingest` 는 사람이 아니라 기계가 부르므로
 별도 시크릿 헤더를 쓴다. 세션 쿠키와 섞지 않는다.
+
+그 기계용 토큰이 둘이다. `VOCAB_INGEST_TOKEN` 은 기계용 엔드포인트를 전부 연다 —
+여기에는 `/api/export`(복습 기록까지 포함한 DB 전체 덤프)가 들어 있다. 수업 PC 는
+어휘를 넣기만 하면 되므로 그 토큰을 주지 않고, `/ingest` 에서만 통하는
+`VOCAB_REMOTE_TOKEN` 을 준다. 그 PC 에서 새더라도 잃는 것은 쓰기 권한 하나이고,
+어휘는 로컬에서 다시 만들 수 있는 데이터다. 읽기는 넘어가지 않는다.
 """
 
 from __future__ import annotations
@@ -50,6 +56,11 @@ def ingest_token() -> str:
     return os.environ.get("VOCAB_INGEST_TOKEN", "")
 
 
+def remote_token() -> str:
+    """`/ingest` 에서만 통하는 좁은 토큰. 비워 두면 없는 것으로 친다."""
+    return os.environ.get("VOCAB_REMOTE_TOKEN", "")
+
+
 def _serializer(salt: str) -> URLSafeTimedSerializer:
     return URLSafeTimedSerializer(secret_key(), salt=salt)
 
@@ -90,10 +101,22 @@ def is_logged_in(request: Request) -> bool:
     return True
 
 
-def require_ingest_token(request: Request) -> None:
-    expected = ingest_token()
-    if not expected:
+def require_ingest_token(request: Request, *, remote_ok: bool = False) -> None:
+    """기계용 API 인증. `remote_ok` 인 자리(=`/ingest`)에서만 좁은 토큰도 받는다."""
+    accepted = [ingest_token()]
+    if remote_ok:
+        accepted.append(remote_token())
+    # 설정되지 않은 토큰을 후보에 남기면 빈 헤더가 통과한다. 인증 전체가 무력화되는
+    # 자리라 값이 있는 것만 남긴다.
+    accepted = [token for token in accepted if token]
+    if not accepted:
         raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "ingest 가 설정되지 않았습니다.")
-    given = request.headers.get("x-ingest-token", "")
-    if not hmac.compare_digest(given.encode("utf-8"), expected.encode("utf-8")):
+
+    given = request.headers.get("x-ingest-token", "").encode("utf-8")
+    # 어느 쪽과 맞았는지가 응답 시간으로 드러나지 않도록 조기 종료하지 않는다.
+    matched = False
+    for token in accepted:
+        if hmac.compare_digest(given, token.encode("utf-8")):
+            matched = True
+    if not matched:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "ingest 토큰이 일치하지 않습니다.")

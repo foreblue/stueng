@@ -53,6 +53,12 @@ def kind_for(display: str) -> str:
 
 SOURCE_UPFIRST = "upfirst"
 SOURCE_PLANETMONEY = "planetmoney"
+#: 뜻이 아직 없는 어휘. 원격 기기가 후보만 뽑아 보낸 상태다. LLM 은 맥에만 있으므로
+#: 서버는 이대로 쌓아 두고, `vocab.tutor` 가 `/api/tasks` 로 가져가 채운다.
+#: NULL 이 아니라 빈 문자열인 이유: 마이그레이션이 필요 없고, meaning_kr 을 str 로
+#: 다루는 기존 코드(템플릿·프롬프트 포매팅)가 None 을 만나 터지지 않는다.
+PENDING_GLOSS = ""
+
 SOURCE_CLASS = "class"
 SOURCE_CORRECTION = "correction"  # 영어수업에서 내가 틀려 교정받은 표현
 

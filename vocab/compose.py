@@ -20,7 +20,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from . import study
-from .models import STAGES, Card, Composition, ReviewLog, Word
+from .models import PENDING_GLOSS, STAGES, Card, Composition, ReviewLog, Word
 
 #: 한 과제에 쓰는 어휘 수. 세 개면 문단 하나가 나오고, 더 늘리면 억지 문장이 된다.
 WORDS_PER_TASK = 3
@@ -122,6 +122,25 @@ def pending_feedback(session: Session) -> list[Composition]:
         select(Composition)
         .where(Composition.submitted_at.is_not(None), Composition.feedback.is_(None))
         .order_by(Composition.week_start)
+    ).all()
+
+
+def words_without_gloss(session: Session, limit: int = 40) -> list[Word]:
+    """뜻이 비어 있는 어휘. 원격 기기가 후보만 뽑아 보낸 것들이다.
+
+    수업 PC 는 전사문에서 후보를 고르는 데까지만 할 수 있다 — 빈도 밴드 판정은 규칙이라
+    옮겨 가지만, 뜻과 쓰임을 쓰는 일에는 LLM 이 필요하고 자격증명은 맥에만 있다.
+    그래서 뜻 없이 받아 두고 여기 쌓는다. 채워지기 전까지 `study` 가 카드로 만들지
+    않으므로, 밀린다고 해서 빈 카드가 출제되는 일은 없다.
+
+    먼저 만난 것부터 돌려준다. 예문이 몇 개 딸렸는지는 보지 않는다 — 뜻을 쓰는 데는
+    문장 하나면 충분하고, 순서를 예문 수로 매기면 한 번만 나온 단어가 영영 밀린다.
+    """
+    return session.scalars(
+        select(Word)
+        .where(Word.meaning_kr == PENDING_GLOSS, Word.known.is_(False))
+        .order_by(Word.first_seen.asc(), Word.id.asc())
+        .limit(limit)
     ).all()
 
 

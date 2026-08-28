@@ -4,8 +4,11 @@
 있고, 그 구조를 유지하는 편이 비용도 0원이고 서버도 가볍다. 그래서 LLM 이 필요한 일은
 서버가 "해 달라" 고 쌓아 두고, 이 워커가 가져가 처리한 뒤 결과만 밀어 넣는다.
 
-두 가지를 처리한다.
+세 가지를 처리한다.
 
+- **뜻 채우기** — 수업 PC 가 후보만 뽑아 보낸 어휘에 뜻을 쓴다. 후보 선정은 빈도 규칙이라
+  그 PC 에서도 돌지만, 뜻은 LLM 이 필요하다. 뜻이 없는 동안 그 어휘는 카드가 되지 않으므로
+  이 워커가 며칠 밀려도 빈 문제가 나가지는 않는다 — 새 카드가 늦어질 뿐이다.
 - **작문 첨삭** — 주 1회 과제로 쓴 글을 고쳐 준다.
 - **막힌 카드의 기억술** — 여러 번 놓친 카드에만 붙인다. 니모닉은 초기 회상에는 강하나
   시간이 지나면 이점이 감쇠하고 자동 생성 품질의 편차가 크므로, 기본 장치가 아니라
@@ -32,6 +35,10 @@ TIMEOUT = 60
 
 #: 한 번에 처리할 개수 상한. LLM 호출이 건당 수십 초라 무한정 돌면 곤란하다.
 MAX_PER_RUN = 5
+
+#: 뜻은 이 배수만큼 더 처리한다. 첨삭·기억술과 달리 응답이 두 줄이라 빠르고, 이게 밀리면
+#: 원격에서 들어온 어휘가 카드로 나오지 못한 채 쌓인다.
+GLOSS_MULTIPLIER = 4
 
 COMPOSITION_PROMPT = """You are an English tutor for a Korean-speaking adult learner.
 
@@ -83,6 +90,22 @@ if you are not sure a root is real, use a different kind of hook. Return only th
 no headings, no preamble."""
 
 
+GLOSS_PROMPT = """You are making a vocabulary card for a Korean-speaking adult learner \
+who is studying English.
+
+{kind}: {display}
+Sentences where they actually met it:
+{examples}
+
+Write the gloss for THIS use — the sense that fits the sentences above, not every sense the
+dictionary lists. Return exactly two lines, nothing else:
+
+뜻: (Korean meaning, at most 15 words. No part-of-speech label, no romanization.)
+영영: (a short English definition, at most 15 words)
+
+If the sentences are too garbled to tell what it means, return exactly: 판단불가"""
+
+
 class TutorError(RuntimeError):
     pass
 
@@ -107,14 +130,14 @@ def fetch_tasks() -> dict:
     return response.json()
 
 
-def submit_results(mnemonics: list[dict], feedback: list[dict]) -> dict:
-    if not mnemonics and not feedback:
-        return {"mnemonics": 0, "feedback": 0}
+def submit_results(glosses: list[dict], mnemonics: list[dict], feedback: list[dict]) -> dict:
+    if not glosses and not mnemonics and not feedback:
+        return {"glosses": 0, "mnemonics": 0, "feedback": 0}
 
     base = _require()
     response = requests.post(
         f"{base}/api/tasks",
-        json={"mnemonics": mnemonics, "feedback": feedback},
+        json={"glosses": glosses, "mnemonics": mnemonics, "feedback": feedback},
         headers=_headers(),
         timeout=TIMEOUT,
     )
@@ -133,6 +156,36 @@ def write_feedback(task: dict) -> str | None:
         logger.warning("첨삭 실패 (%s): %s", task["week_start"], reason)
         return None
     return raw.strip()
+
+
+def write_gloss(task: dict) -> dict | None:
+    """후보 어휘 하나의 뜻. 실패하면 None — 다음 실행에서 다시 잡힌다."""
+    examples = "\n".join(f'  "{s}"' for s in task.get("examples") or []) or "  (없음)"
+    kind = "expression" if task.get("kind") == "expression" else "word"
+    prompt = GLOSS_PROMPT.format(kind=kind, display=task["display"], examples=examples)
+    raw, reason = analyzer.complete(prompt, label="뜻 채우기")
+    if not raw:
+        logger.warning("뜻 생성 실패 (%s): %s", task["display"], reason)
+        return None
+
+    meaning_kr = meaning_en = ""
+    for line in raw.strip().splitlines():
+        line = line.strip()
+        if line.startswith("뜻:"):
+            meaning_kr = line.split(":", 1)[1].strip()
+        elif line.startswith("영영:"):
+            meaning_en = line.split(":", 1)[1].strip()
+
+    if not meaning_kr:
+        # "판단불가" 이거나 형식을 벗어난 응답. 지어낸 뜻을 넣느니 비워 두는 편이 낫다.
+        logger.warning("뜻을 읽지 못해 건너뜁니다 (%s): %s", task["display"], raw.strip()[:60])
+        return None
+
+    return {
+        "word_id": task["word_id"],
+        "meaning_kr": meaning_kr[:500],
+        "meaning_en": meaning_en[:500] or None,
+    }
 
 
 def make_mnemonic(task: dict) -> str | None:
@@ -158,13 +211,23 @@ def run(*, dry_run: bool = False, limit: int = MAX_PER_RUN) -> dict:
     tasks = fetch_tasks()
     pending_feedback = tasks.get("compositions", [])[:limit]
     pending_mnemonics = tasks.get("mnemonics", [])[:limit]
+    # 뜻은 한 건이 짧아 여러 개를 돌려도 부담이 적고, 밀리면 새 카드가 아예 안 나온다.
+    pending_glosses = tasks.get("glosses", [])[: limit * GLOSS_MULTIPLIER]
 
     if dry_run:
         return {
             "dry_run": True,
             "compositions": [t["week_start"] for t in pending_feedback],
             "mnemonics": [t["display"] for t in pending_mnemonics],
+            "glosses": [t["display"] for t in pending_glosses],
         }
+
+    glosses = []
+    for task in pending_glosses:
+        item = write_gloss(task)
+        if item:
+            glosses.append(item)
+            logger.info("뜻 완료: %s — %s", task["display"], item["meaning_kr"])
 
     feedback = []
     for task in pending_feedback:
@@ -180,8 +243,12 @@ def run(*, dry_run: bool = False, limit: int = MAX_PER_RUN) -> dict:
             mnemonics.append({"word_id": task["word_id"], "text": text})
             logger.info("기억술 완료: %s", task["display"])
 
-    applied = submit_results(mnemonics, feedback)
-    applied["attempted"] = {"feedback": len(pending_feedback), "mnemonics": len(pending_mnemonics)}
+    applied = submit_results(glosses, mnemonics, feedback)
+    applied["attempted"] = {
+        "feedback": len(pending_feedback),
+        "mnemonics": len(pending_mnemonics),
+        "glosses": len(pending_glosses),
+    }
     return applied
 
 
@@ -203,11 +270,13 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     if result.get("dry_run"):
+        print(f"뜻 대기 {len(result['glosses'])}건: {', '.join(result['glosses']) or '없음'}")
         print(f"첨삭 대기 {len(result['compositions'])}건: {', '.join(result['compositions']) or '없음'}")
         print(f"기억술 대기 {len(result['mnemonics'])}건: {', '.join(result['mnemonics']) or '없음'}")
     else:
         attempted = result["attempted"]
         print(
+            f"뜻 {result['glosses']}/{attempted['glosses']}건, "
             f"첨삭 {result['feedback']}/{attempted['feedback']}건, "
             f"기억술 {result['mnemonics']}/{attempted['mnemonics']}건 반영"
         )

@@ -15,7 +15,8 @@ NPR 팟캐스트와 화상 영어 수업에서 어휘를 모아, 간격 반복�
 ─────────────────────────────           ─────────────────────────
 main.py          Up First 일일 분석
 weekly_study.py  Planet Money 주간
-english-class    수업 녹음·전사
+english-class    수업 전사·노트
+   ↑ scp (수업 PC가 녹음한 파일)
    ↓ (localhost:9000 LLM 프록시)
 data/*.json
    ↓
@@ -35,8 +36,30 @@ messenger.py     텔레그램 알림    ←──   /api/progress
 이쪽은 단어를 싣지 않고 개수와 링크만 보내 앱을 열게 만든다.
 
 **서버는 복습만 한다.** 팟캐스트를 받아오는 일도, LLM 을 부르는 일도 하지 않는다.
-분석에 쓰는 프록시는 이 맥북에만 있고 수업 녹음은 ScreenCaptureKit 기반이라 옮길 수
+분석에 쓰는 프록시는 이 맥북에만 있고 전사는 mlx-whisper(Apple Silicon) 라 옮길 수
 없다. 그 제약을 우회하는 대신 받아들였다 — 덕분에 API 비용이 0원이고 서버가 가볍다.
+
+**수업은 다른 PC 에서 진행된다.** 헤드셋을 쓰므로 맥에서는 소리를 잡을 수 없다. 길이 둘이다.
+
+1. **맥이 노트를 쓴다.** 그 PC 가 오디오 트랙 두 개(강사/나)로 녹음해
+   `~/Movies/english-class/inbox/` 로 `scp` 하면 `import.sh` 가 맥 녹음과 같은 형태로
+   쪼갠다. 그 뒤 전사·노트·수집은 종전 그대로다. 교정 표까지 나오니 어휘의 질이 가장 좋다.
+2. **그 PC 가 직접 보낸다.** `python -m vocab.remote` 가 전사문에서 후보를 뽑아
+   `/ingest` 로 밀어 넣는다. 맥에서 손을 댈 일이 없다.
+
+둘째 길에서 갈리는 지점이 하나 있다. **후보 선정은 옮겨지지만 뜻은 못 옮긴다** — 선정은
+빈도 규칙이라 같은 코드가 같은 답을 내지만, 뜻을 쓰는 데는 LLM 이 필요하고 자격증명은
+맥에만 있다. 그래서 뜻을 비운 채 보내고, 서버는 그 어휘를 **카드로 만들지 않은 채** 쌓아
+둔다(`study._new_word_query` 가 막는다). 맥에서 `vocab.tutor` 가 돌 때 채워지고 그때부터
+출제된다. 워커가 며칠 밀려도 빈 문제가 나가지 않고 새 카드만 늦어진다.
+
+두 길은 배타적이지 않다. 표제어가 겹치면 서버가 합치고, 원격이 비워 둔 뜻은 나중에 들어온
+수업 노트가 채운다. 자세한 설정은 `skills/english-class/SKILL.md`.
+
+**수업 PC 에는 좁은 토큰만 준다.** `VOCAB_INGEST_TOKEN` 은 `/api/export` 까지 여는데,
+그건 복습 기록이 담긴 DB 전체 덤프이고 서버에만 있는 유일한 데이터다. 어휘를 넣기만
+하면 되는 기계에 줄 권한이 아니다. `/ingest` 에서만 통하는 `VOCAB_REMOTE_TOKEN` 을
+따로 두어, 그 PC 에서 새더라도 잃는 것이 쓰기 권한 하나에 그치게 한다.
 
 **소유권도 나뉜다.** 어휘(`word`, `occurrence`)는 로컬이 원본이라 언제든 다시 만들 수
 있다. 복습 기록(`card`, `review_log`)은 서버에만 있는 유일한 데이터다. 그래서
@@ -53,7 +76,7 @@ python -m vocab.sync push --dry-run
 python -m vocab.sync notify        # 복습할 게 있으면 텔레그램 알림
 python -m vocab.sync status        # 서버 현황
 
-python -m vocab.tutor              # 작문 첨삭 + 막힌 카드 기억술 (LLM 사용)
+python -m vocab.tutor              # 뜻 채우기 + 작문 첨삭 + 막힌 카드 기억술 (LLM 사용)
 python -m vocab.tutor --dry-run
 
 python -m vocab.optimize --check   # FSRS 재학습에 기록이 충분한지
@@ -67,7 +90,19 @@ VOCAB_PASSWORD=dev VOCAB_INGEST_TOKEN=dev \
   uvicorn vocab.app.main:app --reload --port 8000
 ```
 
+수업 PC 에서 (이 저장소를 clone 해 두고, hosts 한 줄과 `VOCAB_REMOTE_TOKEN` 을 설정한 뒤):
+
+```bash
+python -m vocab.remote --transcript transcript.md --tutor Anna
+python -m vocab.remote --audio class.mkv          # 전사부터 그 PC 에서
+python -m vocab.remote --transcript x.md --dry-run
+```
+
 ## 배포
+
+서버 코드를 고쳤으면(`vocab/app/`, `vocab/models.py`, `vocab/study.py`, `vocab/compose.py`)
+컨테이너를 다시 올려야 반영된다. `vocab/remote.py` 의 뜻 대기 왕복과 `VOCAB_REMOTE_TOKEN`
+도 여기 포함된다 — 게이트웨이 `docker-compose.yml` 이 그 값을 컨테이너로 넘긴다.
 
 `~/workspace/deepheart-gw` 게이트웨이(Traefik)에 컨테이너로 붙는다.
 주소는 https://stueng.deepheart.duckdns.org 이고 인증서는 Let's Encrypt DNS-01 로
@@ -99,6 +134,13 @@ VOCAB_INGEST_TOKEN=...   # stueng/.env 와 동일
 NAT 을 지원하지 않아 **내부에서 공인 주소로 되돌아오지 못하기 때문**이다. 이 맥북에서
 도는 것들(`vocab.sync push`, `vocab.tutor`, `vocab.optimize`)은 이 포트를 쓴다.
 LAN 에는 열려 있지 않다 — 루프백 전용이다.
+
+**수업 PC 는 이 포트를 쓰지 않는다.** 루프백 바인딩이라 LAN 에서 닿지 않는다. 대신
+게이트웨이를 그대로 쓴다 — Traefik 의 443 은 LAN 에도 열려 있고 이미 정식 인증서로
+`stueng.deepheart.duckdns.org` 를 서비스한다. 막힌 것은 이름 풀이뿐이므로 그 PC 의
+hosts 에 `192.168.45.93 stueng.deepheart.duckdns.org` 한 줄이면 된다. TLS 검증은
+정상으로 통과하고(이름에 대해 발급된 인증서다), 보안 헤더와 rate limit 도 그대로 걸린다.
+새로 여는 포트도, 끄는 검증도 없다.
 
 같은 이유로 텔레그램 알림의 링크(`VOCAB_APP_URL`)는 집 안 와이파이에서는 열리지 않을
 수 있다. 셀룰러로는 정상이다.
@@ -133,7 +175,8 @@ Postgres 로 옮기려면 `requirements-app.txt` 의 `psycopg[binary]` 주석을
 0 7 * * *  cd ~/workspace/stueng && .venv/bin/python -m vocab.sync push   >> logs/sync.log 2>&1
 5 7 * * *  cd ~/workspace/stueng && .venv/bin/python -m vocab.sync notify >> logs/sync.log 2>&1
 
-# 저녁 9시 — 작문 첨삭·기억술 (LLM 프록시가 떠 있어야 한다)
+# 저녁 9시 — 뜻 채우기·작문 첨삭·기억술 (LLM 프록시가 떠 있어야 한다)
+# 수업 PC 가 밀어 넣은 어휘는 이게 돌아야 카드가 된다.
 0 21 * * * cd ~/workspace/stueng && .venv/bin/python -m vocab.tutor >> logs/tutor.log 2>&1
 ```
 
@@ -150,7 +193,8 @@ Postgres 로 옮기려면 `requirements-app.txt` 의 `psycopg[binary]` 주석을
 | `AI_MODELS` | 로컬 | 폴백 순서 |
 | `VOCAB_SERVER_URL` | 로컬 | 배포된 서버 주소 |
 | `VOCAB_APP_URL` | 로컬 | 알림에 넣을 주소. 비우면 서버 주소를 쓴다 |
-| `VOCAB_INGEST_TOKEN` | 양쪽 | 기계용 API 인증. 양쪽이 같아야 한다 |
+| `VOCAB_INGEST_TOKEN` | 양쪽 | 기계용 API 인증. 양쪽이 같아야 한다. **여섯 엔드포인트를 다 연다 — `/api/export` 포함** |
+| `VOCAB_REMOTE_TOKEN` | 서버 + 수업 PC | `/ingest` 에서만 통하는 좁은 토큰. 비우면 없는 것으로 동작한다 |
 | `VOCAB_DB_URL` | 양쪽 | 비우면 로컬 `data/vocab.db` |
 | `VOCAB_ENV` | 서버 | `production` 이어야 한다. 아니면 세션 쿠키에서 `Secure` 가 빠지고 설정 누락 검사도 꺼진다 |
 | `VOCAB_PASSWORD` | 서버 | 로그인 비밀번호 |
@@ -163,7 +207,9 @@ Postgres 로 옮기려면 `requirements-app.txt` 의 `psycopg[binary]` 주석을
 ## 알아둘 것
 
 **마이그레이션 도구가 없다.** 스키마는 기동 시 `create_all` 로만 만들어진다. 컬럼을
-추가하면 기존 테이블에는 반영되지 않는다. 로컬은 `vocab.collect --rebuild` 로 다시
+추가하면 기존 테이블에는 반영되지 않는다. 뜻 대기 상태를 새 컬럼이 아니라
+`meaning_kr == ""`(`models.PENDING_GLOSS`) 로 표현한 것도 이 때문이다 — 기존 DB 에
+손대지 않고 컨테이너만 다시 올리면 된다. 로컬은 `vocab.collect --rebuild` 로 다시
 만들면 되지만(어휘는 재생성 가능), 서버에 복습 기록이 쌓인 뒤 스키마를 바꾸려면
 Alembic 을 넣거나 손으로 `ALTER TABLE` 을 해야 한다.
 

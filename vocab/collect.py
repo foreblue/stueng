@@ -337,7 +337,10 @@ def upsert(session: Session, entry: Entry, stats: Stats) -> Word | None:
             word.first_seen = entry.occurred_on
             changed = True
         # 비어 있던 칸만 채운다. 먼저 들어온 뜻을 덮어쓰지 않는다.
-        for attr in ("meaning_en", "usage_note"):
+        # meaning_kr 이 여기 있는 이유: 원격이 뜻 없이 보낸 어휘를 나중에 수업 노트나
+        # 팟캐스트 분석이 같은 표제어로 다시 만나면 그때 채워진다. 뜻이 이미 있으면
+        # 빈 값으로 밀리지 않는다 — 조건이 양쪽 다 보기 때문이다.
+        for attr in ("meaning_kr", "meaning_en", "usage_note"):
             if not getattr(word, attr) and getattr(entry, attr):
                 setattr(word, attr, getattr(entry, attr))
                 changed = True
@@ -359,7 +362,7 @@ def upsert(session: Session, entry: Entry, stats: Stats) -> Word | None:
                     sentence=entry.sentence,
                     sentence_hash=key,
                     translation_kr=entry.translation_kr,
-                    definition_kr=entry.meaning_kr,
+                    definition_kr=entry.meaning_kr or None,
                     usage_note=entry.usage_note,
                     source_kind=entry.source_kind,
                     source_title=entry.source_title,
