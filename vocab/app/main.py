@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import mimetypes
 import os
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -52,6 +53,10 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="stueng vocab", lifespan=lifespan, docs_url=None, redoc_url=None)
+# 컨테이너의 mimetypes 에 woff2 가 없어 application/octet-stream 으로 나간다.
+# 지금 브라우저는 CSS 의 format("woff2") 를 보고 넘어가지만, 맞는 타입을 주는 편이 낫다.
+mimetypes.add_type("font/woff2", ".woff2")
+
 app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
 templates = Jinja2Templates(directory=BASE_DIR / "templates")
 

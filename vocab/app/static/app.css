@@ -9,6 +9,39 @@
  * 3. 위계는 크기가 아니라 고도로 만든다. 중요한 것일수록 더 높이 뜨고 라운드가 크다.
  */
 
+/* 표시용 활자. Google Fonts 에서 받아 오지 않고 여기서 직접 낸다.
+ *
+ * 외부에서 받으면 앱을 열 때마다 브라우저가 구글에 요청을 보낸다 — 방문 사실이 새어
+ * 나가고, 홈화면에 붙여 둔 PWA 가 네트워크에 매여 버린다. 라틴 서브셋 35KB 면
+ * 그 대가를 치를 이유가 없다.
+ *
+ * 두 규칙이 같은 파일을 가리키는 것은 원본 그대로다(가변 폰트라 축으로 굵기가 난다).
+ * unicode-range 를 두어 한글은 이 파일을 기다리지 않고 곧장 시스템 활자로 간다.
+ */
+@font-face {
+  font-family: "Archivo";
+  font-style: normal;
+  font-weight: 600;
+  font-stretch: 100%;
+  font-display: swap;
+  src: url("/static/fonts/archivo-latin-var.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC,
+    U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215,
+    U+FEFF, U+FFFD;
+}
+
+@font-face {
+  font-family: "Archivo";
+  font-style: normal;
+  font-weight: 700;
+  font-stretch: 100%;
+  font-display: swap;
+  src: url("/static/fonts/archivo-latin-var.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC,
+    U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215,
+    U+FEFF, U+FFFD;
+}
+
 :root {
   --ground: #f2f4f8;
   --surface: #ffffff;

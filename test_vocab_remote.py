@@ -473,7 +473,7 @@ def test_ingest_is_unavailable_when_no_token_is_configured():
 
 def test_plain_http_is_refused():
     """토큰을 평문으로 내보내느니 멈춘다."""
-    with _remote_env(VOCAB_SERVER_URL="http://192.168.45.93:8010"):
+    with _remote_env(VOCAB_SERVER_URL="http://10.0.0.1:8010"):
         try:
             remote._server()
         except remote.RemoteError as e:

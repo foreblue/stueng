@@ -145,7 +145,7 @@ LAN 에는 열려 있지 않다 — 루프백 전용이다.
 있고 DuckDNS 가 IP 를 따라간다. 열 포트도 터널도 없다.
 
 집 안에서 올릴 일이 생기면 그때만 그 PC 의 hosts 에
-`192.168.45.93 stueng.deepheart.duckdns.org` 를 넣는다. Traefik 443 은 LAN 에도 열려
+`<맥의 LAN IP> stueng.deepheart.duckdns.org` 를 넣는다. Traefik 443 은 LAN 에도 열려
 있고 인증서는 이름에 대해 발급된 것이라 검증도 정상이다. 밖으로 나갈 때 지워야 하므로
 기본으로 넣지는 않는다.
 

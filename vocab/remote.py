@@ -30,7 +30,7 @@
 안에서 공인 IP 로는 못 돌아오지만, **이름을 LAN IP 로 풀어 주면 그대로 닿는다.** 수업
 PC 의 hosts 파일에 한 줄이면 되고, 인증서 검증도 정상으로 통과한다.
 
-    192.168.45.93  stueng.deepheart.duckdns.org
+    <맥의 LAN IP>  stueng.deepheart.duckdns.org
     VOCAB_SERVER_URL=https://stueng.deepheart.duckdns.org
 
 TLS 검증을 끄거나 컨테이너를 LAN 에 새로 여는 길은 쓰지 않는다. 전자는 토큰을 중간자

@@ -107,7 +107,7 @@ B단계는 스킬을 매번 다시 부르지 않아도 된다. 한 번 시작하
 (`scp` 는 윈도우 10 이상·리눅스에 기본으로 있다):
 
 ```
-scp <녹화파일> dysim@192.168.45.93:~/Movies/english-class/inbox/
+scp <녹화파일> <사용자>@<맥의 LAN IP>:~/Movies/english-class/inbox/
 ```
 
 파일이 들어오면 맥에서:
@@ -206,9 +206,9 @@ OBS Studio (윈도우·리눅스 공통) 기준:
 한 컨테이너 안의 두 트랙은 같은 클럭에서 나오므로 어긋남이 없다. `import.sh` 가
 `sync.json` 을 offset 0 으로 써 둔다 — 맥 녹음과 달리 트랙 싱크를 걱정할 필요가 없다.
 
-전송은 그 PC 에서 맥으로 `scp` 다. 맥은 원격 로그인이 켜져 있고 주소는
-`dysim@192.168.45.93`(호스트명 `mini`), 받는 곳은 `~/Movies/english-class/inbox/` 다.
-IP 가 바뀌었으면 맥에서 `ipconfig getifaddr en0` 로 다시 확인한다.
+전송은 그 PC 에서 맥으로 `scp` 다. 맥은 원격 로그인이 켜져 있고 받는 곳은
+`~/Movies/english-class/inbox/` 다. 주소와 사용자명은 이 저장소가 공개라 적지 않는다 —
+맥의 LAN 주소는 그 맥에서 `ipconfig getifaddr en0`, 사용자명은 `whoami` 로 확인한다.
 
 **이 경로는 같은 와이파이일 때만 된다.** 사설 IP 라 밖에서는 닿지 않는다. 밖에서
 작업한다면 아래 "수업 PC 에서 바로 보내기" 를 쓴다 — 그쪽은 공인 주소라 어디서든 된다.
@@ -271,8 +271,10 @@ export VOCAB_REMOTE_TOKEN=<게이트웨이 .env 의 VOCAB_REMOTE_TOKEN>
 `C:\Windows\System32\drivers\etc\hosts` — 관리자 권한)
 
 ```
-192.168.45.93  stueng.deepheart.duckdns.org
+<맥의 LAN IP>  stueng.deepheart.duckdns.org
 ```
+
+(맥의 LAN 주소는 그 맥에서 `ipconfig getifaddr en0`, 사용자명은 `whoami` 로 확인한다. 이 저장소는 공개라 실제 값을 적지 않는다.)
 
 Traefik 의 443 은 LAN 에도 열려 있고 인증서는 이름에 대해 발급된 것이라, 이렇게 해도
 검증이 정상으로 통과한다. TLS 검증을 끄거나 http 로 우회할 이유는 없다.
