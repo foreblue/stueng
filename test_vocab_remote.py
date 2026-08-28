@@ -291,13 +291,13 @@ NOTE = """# 영어수업 2026-08-28
 
 | 내가 한 말 | 자연스러운 표현 | 왜 |
 | --- | --- | --- |
-| I am working there since 2020 | I have been working there since 2020 | since 는 현재완료와 쓴다 |
+| I am working there **since 2020** | I **have been working** there since 2020 | since 는 현재완료와 쓴다 |
 
 ## 새 단어·표현
 
 | 표현 | 뜻 | 예문 |
 | --- | --- | --- |
-| capitulate | 굴복하다 | They capitulated after negotiations. |
+| **capitulate** | 굴복하다 | They `capitulated` after negotiations. |
 | take on | (일을) 맡다 | I'd love to take on more responsibility. |
 | | | |
 """
@@ -326,6 +326,41 @@ def test_note_keeps_corrections_apart_from_new_words():
     assert correction["source_kind"] == SOURCE_CORRECTION
     assert correction["usage_note"] == "내가 한 말: I am working there since 2020"
     assert by_display["capitulate"]["source_kind"] == SOURCE_CLASS
+
+
+def test_markdown_emphasis_never_reaches_the_card():
+    """노트는 고친 부분을 **강조**해 둔다. 그게 어휘로 넘어오면 카드에 별표가 뜨고
+    headword 에도 섞여 같은 표현을 다른 어휘로 세게 된다."""
+    entries = remote.build_from_note(str(_note_file()))
+    for entry in entries:
+        for field in ("display", "meaning_kr", "sentence", "usage_note"):
+            value = entry.get(field) or ""
+            assert "*" not in value and "`" not in value, (field, value)
+
+    by_display = {e["display"]: e for e in entries}
+    assert "I have been working there since 2020" in by_display
+    assert by_display["capitulate"]["sentence"] == "They capitulated after negotiations."
+
+
+def test_other_markdown_constructs_are_unwrapped_too():
+    """노트는 마크다운 문서다. 강조만 막으면 다음 구문에서 같은 버그가 난다."""
+    from vocab import notes as n
+
+    assert n.clean("[[동물 표현]] 참고") == "동물 표현 참고"
+    assert n.clean("[[영어수업 2026-08-20|지난 수업]] 표현") == "지난 수업 표현"
+    assert n.clean("자세히는 [여기](https://example.com) 참고") == "자세히는 여기 참고"
+    # 취소선은 지운다 — 살리면 틀린 표현을 함께 가르치게 된다.
+    assert n.clean("~~I am working~~ I have been working") == "I have been working"
+
+
+def test_an_escaped_pipe_does_not_split_the_cell():
+    """표 셀 안의 `\\|` 에서 잘리면 뜻의 뒷부분이 통째로 사라진다."""
+    from vocab import notes as n
+
+    rows = n.markdown_tables(
+        "## 새 단어·표현\n\n| 표현 | 뜻 |\n| --- | --- |\n| pipe dream | 헛된 꿈 (a \\| b) |\n"
+    )["새 단어·표현"]
+    assert rows[1] == ["pipe dream", "헛된 꿈 (a | b)"]
 
 
 def test_note_kind_follows_the_written_form():
@@ -488,6 +523,9 @@ if __name__ == "__main__":
         test_the_narrow_token_can_read_handled_words,
         test_note_entries_arrive_with_meanings,
         test_note_keeps_corrections_apart_from_new_words,
+        test_markdown_emphasis_never_reaches_the_card,
+        test_other_markdown_constructs_are_unwrapped_too,
+        test_an_escaped_pipe_does_not_split_the_cell,
         test_note_kind_follows_the_written_form,
         test_empty_template_rows_are_dropped,
         test_a_misnamed_note_stops_loudly,

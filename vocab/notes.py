@@ -24,12 +24,45 @@ from pathlib import Path
 #: 같은 날 두 번째 수업은 `(2)` 가 붙는다.
 CLASS_NOTE_RE = re.compile(r"^영어수업 (\d{4}-\d{2}-\d{2})(?: \((\d+)\))?\.md$")
 
+#: 이스케이프되지 않은 파이프에서만 자른다.
+CELL_SPLIT_RE = re.compile(r"(?<!\\)\|")
+
 SOURCE_CLASS = "class"
 SOURCE_CORRECTION = "correction"  # 영어수업에서 내가 틀려 교정받은 표현
 
 
+#: 노트는 사람이 읽는 마크다운이다. 고친 부분을 `**이렇게**` 강조해 두고, 볼트가
+#: Obsidian 이라 다른 노트를 `[[위키링크]]` 로 건다. 그 표시가 어휘로 넘어오면 카드
+#: 앞면에 별표가 그대로 뜨고, `headword` 에도 섞여 같은 표현을 다른 어휘로 세게 된다.
+#: 표시는 벗기고 사람이 읽는 글자만 남긴다.
+#:
+#: 한 구문만 막으면 다음 구문에서 같은 버그가 난다. 그래서 노트에 나올 만한 것을
+#: 함께 다룬다 — 지금 데이터에 있는 것은 강조뿐이지만, 입력이 마크다운인 이상 나머지도
+#: 언제든 들어온다.
+WIKILINK_RE = re.compile(r"\[\[(?:[^\]|]*\|)?([^\]]+)\]\]")  # [[대상|보이는 글자]]
+LINK_RE = re.compile(r"\[([^\]]+)\]\([^)]*\)")  # [보이는 글자](주소)
+EMPHASIS_RE = re.compile(r"\*\*(.+?)\*\*|\*(.+?)\*|`(.+?)`", re.DOTALL)
+
+#: 취소선은 안의 글자를 살리면 안 된다. "이건 아니다" 라는 표시라, 교정 표에서
+#: `~~틀린 표현~~ 맞는 표현` 이 둘 다 남으면 카드가 틀린 것을 함께 가르친다.
+STRIKE_RE = re.compile(r"~~.+?~~", re.DOTALL)
+
+
+def strip_markup(text: str) -> str:
+    text = WIKILINK_RE.sub(r"\1", text)
+    text = STRIKE_RE.sub("", text)
+    text = LINK_RE.sub(r"\1", text)
+    previous = None
+    # 중첩(`**a *b* c**`)을 위해 더 벗길 것이 없을 때까지 돈다.
+    while previous != text:
+        previous = text
+        text = EMPHASIS_RE.sub(lambda m: next(g for g in m.groups() if g is not None), text)
+    # 짝이 맞지 않아 남은 표시는 그냥 버린다. 남겨 두면 카드에 그대로 뜬다.
+    return text.replace("**", "").replace("~~", "").replace("`", "")
+
+
 def clean(value: object) -> str:
-    return re.sub(r"\s+", " ", str(value or "").strip())
+    return re.sub(r"\s+", " ", strip_markup(str(value or "")).strip())
 
 
 def is_header(cells: list[str], needles: tuple[str, ...]) -> bool:
@@ -51,7 +84,9 @@ def markdown_tables(body: str) -> dict[str, list[list[str]]]:
             continue
         if not stripped.startswith("|"):
             continue
-        cells = [c.strip() for c in stripped.strip("|").split("|")]
+        # 셀 안의 파이프는 `\|` 로 이스케이프된다. 그냥 split 하면 셀이 쪼개져
+        # 뜻의 뒷부분이 통째로 사라진다.
+        cells = [c.strip().replace("\\|", "|") for c in CELL_SPLIT_RE.split(stripped.strip("|"))]
         if not any(cells):
             continue
         if all(set(c) <= {"-", ":", " "} for c in cells if c):
