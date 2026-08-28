@@ -49,6 +49,7 @@ import logging
 import os
 import re
 import sys
+from urllib.parse import urlparse
 
 import requests
 
@@ -70,6 +71,9 @@ DEFAULT_LIMIT = 12
 
 BATCH = 200
 TIMEOUT = 30
+
+#: 평문 HTTP 를 허용하는 유일한 대상. 나가는 트래픽이 아니라 자기 자신이다.
+LOOPBACK = frozenset({"127.0.0.1", "::1", "localhost"})
 
 #: 예문으로 쓸 문장 길이. 너무 짧으면 문맥이 없고, 너무 길면 카드에 안 들어간다.
 MIN_SENTENCE = 20
@@ -124,11 +128,14 @@ def _server() -> tuple[str, str]:
         raise RemoteError(f"환경변수가 없습니다: {', '.join(missing)}")
 
     # 평문 HTTP 로 토큰을 보내지 않는다. 루프백은 예외 — 나가는 트래픽이 아니다.
-    if not url.startswith("https://") and not url.startswith("http://127.0.0.1"):
+    #
+    # 접두사 비교로는 안 된다. `http://127.0.0.1.attacker.example` 가 그대로 통과해
+    # 토큰이 남의 호스트로 평문 전송된다. 호스트 이름을 끝까지 보고 판정한다.
+    parsed = urlparse(url)
+    if parsed.scheme != "https" and parsed.hostname not in LOOPBACK:
         raise RemoteError(
             f"HTTPS 로 보내야 합니다 (지금: {url}). 토큰이 평문으로 나갑니다. "
-            "hosts 파일에 '192.168.45.93 stueng.deepheart.duckdns.org' 를 넣고 "
-            "https 주소를 쓰세요."
+            "VOCAB_SERVER_URL 을 https 주소로 두세요."
         )
     return url, token
 

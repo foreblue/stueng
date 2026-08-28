@@ -482,6 +482,20 @@ def test_plain_http_is_refused():
             raise AssertionError("평문 HTTP 로 보내면 안 된다")
 
 
+def test_a_hostname_that_merely_starts_with_the_loopback_is_refused():
+    """접두사 비교였다면 http://127.0.0.1.attacker.example 이 통과해
+    토큰이 남의 호스트로 평문 전송된다."""
+    for url in ("http://127.0.0.1.attacker.example", "http://127.0.0.1.evil.test/x",
+                "http://localhost.attacker.example"):
+        with _remote_env(VOCAB_SERVER_URL=url):
+            try:
+                remote._server()
+            except remote.RemoteError:
+                pass
+            else:
+                raise AssertionError(f"평문으로 나가면 안 된다: {url}")
+
+
 def test_loopback_is_allowed_for_local_testing():
     with _remote_env(VOCAB_SERVER_URL="http://127.0.0.1:8010"):
         url, token = remote._server()
@@ -538,6 +552,7 @@ if __name__ == "__main__":
         test_an_empty_header_never_authorizes,
         test_ingest_is_unavailable_when_no_token_is_configured,
         test_plain_http_is_refused,
+        test_a_hostname_that_merely_starts_with_the_loopback_is_refused,
         test_loopback_is_allowed_for_local_testing,
         test_the_narrow_token_is_preferred,
         test_the_wide_token_works_but_warns,
