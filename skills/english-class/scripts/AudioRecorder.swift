@@ -5,7 +5,10 @@
 //
 //   audio-recorder <출력경로프리픽스> [--no-menubar]
 //     → <프리픽스>-tutor.m4a (시스템 오디오), <프리픽스>-me.m4a (마이크)
+//   --debug-drop-stream N / --debug-fail-reconnect 은 끊김 복구 경로를 확인하는 용도다.
 //   SIGINT/SIGTERM 을 받으면 파일을 정상 마무리하고 종료한다.
+//   캡처 스트림이 끊기면 다시 붙여 보고(최대 10회, 1초 간격), 끝내 안 되면
+//   그때까지 담은 것을 정상 마무리한 뒤 1 로 끝낸다. 어느 쪽이든 m4a 는 깨지지 않는다.
 
 import Foundation
 import ScreenCaptureKit
@@ -191,6 +194,16 @@ final class TrackWriter {
     }
 }
 
+/// 스트림을 세우지 못하는 경우. 재연결 로그에 그대로 찍힌다.
+enum RecorderError: LocalizedError {
+    case noDisplay
+    var errorDescription: String? {
+        switch self {
+        case .noDisplay: return "캡처할 디스플레이를 찾지 못했다"
+        }
+    }
+}
+
 /// 신호 처리 스레드와 종료 처리 사이의 플래그.
 final class Stopping: @unchecked Sendable {
     private let lock = NSLock()
@@ -202,6 +215,10 @@ final class Stopping: @unchecked Sendable {
 final class Output: NSObject, SCStreamOutput, SCStreamDelegate {
     let tutor: TrackWriter
     let me: TrackWriter
+
+    /// 스트림이 끊겼을 때 Main 에 알린다. ScreenCaptureKit 의 큐에서 불리므로
+    /// 받는 쪽이 MainActor 로 넘어가야 한다. 캡처 시작 전에 한 번만 설정한다.
+    nonisolated(unsafe) var onStreamStopped: (@Sendable (Error) -> Void)?
 
     init(tutor: TrackWriter, me: TrackWriter) {
         self.tutor = tutor
@@ -219,7 +236,9 @@ final class Output: NSObject, SCStreamOutput, SCStreamDelegate {
 
     func stream(_ stream: SCStream, didStopWithError error: Error) {
         FileHandle.standardError.write("스트림 중단: \(error.localizedDescription)\n".data(using: .utf8)!)
-        exit(1)
+        // 여기서 바로 죽으면 AVAssetWriter 가 마무리되지 않아 그때까지 담은 m4a 가
+        // moov 없이 통째로 깨진다. 살리는 일도 다시 붙이는 일도 Main 이 한다.
+        onStreamStopped?(error)
     }
 }
 
@@ -413,47 +432,76 @@ struct Main {
                                          label: "나", clock: clock)
                 let output = Output(tutor: tutor, me: me)
 
-                let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: false)
-                guard let display = content.displays.first else {
-                    FileHandle.standardError.write("디스플레이를 찾지 못했다\n".data(using: .utf8)!)
-                    exit(1)
-                }
-
-                // 오디오만 필요하다. 화면은 최소 크기로 받고 .screen 출력은 등록하지 않는다.
-                let config = SCStreamConfiguration()
-                config.capturesAudio = true
-                config.captureMicrophone = true
-                config.sampleRate = 48000
-                config.channelCount = 2
-                config.width = 2
-                config.height = 2
-                config.minimumFrameInterval = CMTime(value: 1, timescale: 1)
-                config.showsCursor = false
-
-                let filter = SCContentFilter(display: display, excludingWindows: [])
-                let stream = SCStream(filter: filter, configuration: config, delegate: output)
-                let queue = DispatchQueue(label: "capture")
-                try stream.addStreamOutput(output, type: .audio, sampleHandlerQueue: queue)
-                try stream.addStreamOutput(output, type: .microphone, sampleHandlerQueue: queue)
-                try await stream.startCapture()
-                Main.retained = [stream, output, tutor, me]
+                Main.currentStream = try await Main.startStream(output: output)
+                Main.retained = [output, tutor, me]
 
                 print("recording")
                 fflush(stdout)
 
                 // 파일을 정상 마무리하고 끝낸다. 그냥 죽이면 m4a 가 깨진다.
-                let finish: @Sendable () -> Void = {
+                // code 0 은 사용자가 세운 것, 1 은 스트림이 끊겨 되살리지 못한 것이다.
+                let finish: @Sendable (Int32) -> Void = { code in
                     Task { @MainActor in
+                        // 신호와 스트림 중단이 겹쳐도 마무리는 한 번만 돈다.
+                        guard !Main.finishing else { return }
+                        Main.finishing = true
                         statusBar?.teardown()
-                        try? await stream.stopCapture()
+                        if let s = Main.currentStream { try? await s.stopCapture() }
                         await tutor.finish()
                         await me.finish()
                         Main.writeSync(prefix: prefix, tracks: [tutor.stats, me.stats])
-                        print("stopped")
-                        exit(0)
+                        print(code == 0 ? "stopped" : "stopped (스트림 중단)")
+                        fflush(stdout)
+                        exit(code)
                     }
                 }
-                teardown = finish
+                teardown = { finish(0) }
+
+                // 스트림이 끊겨도 담은 것은 지킨다. 잠깐 쉬었다 다시 붙이고, 끝내 안 되면
+                // 그때까지의 파일을 정상 마무리한 뒤 1 로 끝낸다.
+                // 끊긴 동안의 소리는 비어 있다 — 그 사실은 sync.json 에 남는다.
+                output.onStreamStopped = { _ in
+                    Task { @MainActor in
+                        guard !Main.finishing, !stopping.requested else { return }
+                        Main.currentStream = nil
+                        let downFrom = Date()
+                        for attempt in 1...Main.maxReconnect {
+                            try? await Task.sleep(nanoseconds: 1_000_000_000)
+                            guard !Main.finishing, !stopping.requested else { return }
+                            do {
+                                Main.currentStream = try await Main.startStream(output: output)
+                                let gap = Date().timeIntervalSince(downFrom)
+                                Main.reconnects += 1
+                                Main.gapSeconds += gap
+                                Main.warn("스트림 재연결 성공 (\(attempt)번째 시도, "
+                                          + "\(String(format: "%.1f", gap))초 끊김) — 녹음을 계속한다")
+                                return
+                            } catch {
+                                Main.warn("재연결 실패 \(attempt)/\(Main.maxReconnect): "
+                                          + "\(error.localizedDescription)")
+                            }
+                        }
+                        Main.warn("재연결을 포기했다 — 여기까지 담긴 파일을 마무리하고 끝낸다")
+                        finish(1)
+                    }
+                }
+
+                // 끊김 복구를 일부러 일으켜 본다. 진짜 중단은 불러올 수 없으므로,
+                // 스트림을 실제로 세운 뒤 중단 처리기를 그대로 태운다.
+                if args.contains("--debug-fail-reconnect") {
+                    Main.failReconnect = true
+                    Main.maxReconnect = 3          // 확인용이라 짧게 끝낸다
+                }
+                if let i = args.firstIndex(of: "--debug-drop-stream") {
+                    let after = Double(args.count > i + 1 ? args[i + 1] : "3") ?? 3
+                    Timer.scheduledTimer(withTimeInterval: after, repeats: false) { _ in
+                        Task { @MainActor in
+                            Main.warn("[debug] 스트림을 강제로 끊는다")
+                            if let s = Main.currentStream { try? await s.stopCapture() }
+                            output.onStreamStopped?(RecorderError.noDisplay)
+                        }
+                    }
+                }
 
                 if args.contains("--debug-level") {
                     Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { _ in
@@ -462,7 +510,7 @@ struct Main {
                     }
                 }
                 if showMenuBar {
-                    let bar = StatusBar(tutor: tutor.meter, me: me.meter, onStop: { finish() })
+                    let bar = StatusBar(tutor: tutor.meter, me: me.meter, onStop: { finish(0) })
                     statusBar = bar
                     Main.retained.append(bar)
                     if args.contains("--show-popover") {   // 표시 확인용
@@ -476,7 +524,7 @@ struct Main {
                 Timer.scheduledTimer(withTimeInterval: 0.2, repeats: true) { t in
                     if stopping.requested {
                         t.invalidate()
-                        finish()
+                        finish(0)
                     }
                 }
             } catch {
@@ -500,14 +548,66 @@ struct Main {
     /// 신호 소스는 살려둬야 한다. 해제되면 신호를 못 받는다.
     nonisolated(unsafe) static var sources: [DispatchSourceSignal] = []
 
-    /// 스트림과 라이터도 마찬가지다. Task 블록이 끝날 때 해제되면 캡처가 조용히 멈춘다.
+    /// 라이터와 출력도 마찬가지다. Task 블록이 끝날 때 해제되면 캡처가 조용히 멈춘다.
     nonisolated(unsafe) static var retained: [AnyObject] = []
+
+    /// 지금 살아 있는 캡처 스트림. 재연결하면 교체되므로 따로 들고 있어야
+    /// 종료할 때 이미 죽은 스트림에 stopCapture 를 거는 일이 없다.
+    nonisolated(unsafe) static var currentStream: SCStream?
+
+    /// 마무리는 한 번만. 사용자의 중지 신호와 스트림 중단이 겹칠 수 있다.
+    nonisolated(unsafe) static var finishing = false
+
+    /// 끊겼을 때 다시 붙여볼 횟수(1초 간격). 잠깐의 디스플레이 구성 변경은 몇 초면 지나간다.
+    nonisolated(unsafe) static var maxReconnect = 10
+
+    /// 복구 실패 경로를 확인하기 위한 스위치(--debug-fail-reconnect). 평소에는 false.
+    nonisolated(unsafe) static var failReconnect = false
+
+    /// 끊겼다 이어진 횟수와 그동안 빈 시간. sync.json 에 남겨 나중에 알 수 있게 한다.
+    nonisolated(unsafe) static var reconnects = 0
+    nonisolated(unsafe) static var gapSeconds: Double = 0
+
+    static func warn(_ msg: String) {
+        FileHandle.standardError.write((msg + "\n").data(using: .utf8)!)
+    }
+
+    /// 캡처 스트림을 새로 만들어 시작한다. 처음 시작할 때도, 끊긴 뒤 다시 붙일 때도 이 경로다.
+    static func startStream(output: Output) async throws -> SCStream {
+        if failReconnect { throw RecorderError.noDisplay }   // --debug-fail-reconnect 확인용
+        let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: false)
+        guard let display = content.displays.first else { throw RecorderError.noDisplay }
+
+        // 오디오만 필요하다. 화면은 최소 크기로 받고 .screen 출력은 등록하지 않는다.
+        let config = SCStreamConfiguration()
+        config.capturesAudio = true
+        config.captureMicrophone = true
+        config.sampleRate = 48000
+        config.channelCount = 2
+        config.width = 2
+        config.height = 2
+        config.minimumFrameInterval = CMTime(value: 1, timescale: 1)
+        config.showsCursor = false
+
+        let filter = SCContentFilter(display: display, excludingWindows: [])
+        let stream = SCStream(filter: filter, configuration: config, delegate: output)
+        let queue = DispatchQueue(label: "capture")
+        try stream.addStreamOutput(output, type: .audio, sampleHandlerQueue: queue)
+        try stream.addStreamOutput(output, type: .microphone, sampleHandlerQueue: queue)
+        try await stream.startCapture()
+        return stream
+    }
 
     /// 트랙별 시작 지연·유실을 <프리픽스>-sync.json 에 남긴다.
     /// 각 m4a 의 t=0 은 그 트랙의 첫 샘플이므로, 병합 단계에서 offset 을 더해야
     /// 두 트랙의 시각이 같은 기준 위에 놓인다.
     static func writeSync(prefix: String, tracks: [TrackWriter.Stats]) {
         var payload: [String: Any] = ["version": 1]
+        // 끊겼다 이어졌으면 그 구간은 소리가 비어 있다. 길이만 보고는 알 수 없으므로 남긴다.
+        if reconnects > 0 {
+            payload["reconnects"] = reconnects
+            payload["gap_seconds"] = gapSeconds
+        }
         for t in tracks {
             let key = t.file.hasSuffix("-tutor.m4a") ? "tutor" : "me"
             payload[key] = [

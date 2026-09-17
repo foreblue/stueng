@@ -115,6 +115,12 @@ for key, name in (("tutor", "강사"), ("me", "나")):
     lost = int(d.get(key, {}).get("dropped", 0) or 0)
     if lost:
         print(f"  경고: {name} 트랙 샘플 {lost}개 유실 — 그 뒤 시각이 밀렸을 수 있다")
+# 스트림이 끊겼다 이어졌으면 그 구간은 통째로 비어 있다. 길이만 봐서는 드러나지 않는다.
+rc = int(d.get("reconnects", 0) or 0)
+if rc:
+    gap = float(d.get("gap_seconds", 0) or 0)
+    print(f"  경고: 캡처가 {rc}번 끊겼다 이어졌다 (합계 {gap:.1f}초) — 그 구간은 녹음되지 않았다.")
+    print(f"         두 트랙이 같이 끊기므로 화자 정렬은 유지되지만, 그 뒤 전사 시각은 {gap:.1f}초 당겨져 있다")
 PYSYNC
     fi
     echo "프리픽스: $PREFIX"
