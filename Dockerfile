@@ -4,6 +4,12 @@ ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1
 
+# 베이스 이미지는 보안 수정판을 며칠 늦게 싣는다(2026-10 pcre2 deb13u3 는 저장소에만 있었다).
+# 빌드할 때마다 Debian 보안 저장소의 수정판을 받아, 이미지 갱신을 기다리지 않는다.
+RUN apt-get update \
+ && apt-get upgrade -y --no-install-recommends \
+ && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /app
 
 COPY requirements-app.txt ./
