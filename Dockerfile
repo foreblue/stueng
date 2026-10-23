@@ -21,9 +21,18 @@ RUN python -c "from wordfreq import zipf_frequency; zipf_frequency('test', 'en')
 
 COPY vocab/ ./vocab/
 
+# root 가 아니라 app(uid 10001)으로 돈다 — 앱이 뚫려도 컨테이너 안 root 를 내주지 않는다
+# (deepheart-gw 보안 스캔, 2026-10-23). /data 는 VOLUME 선언 전에 app 소유로 만들어야 새 볼륨이
+# 그 소유권을 받는다. root 로 쓴 기존 볼륨은 전환 전 한 번 넘긴다(2026-10-23 운영 볼륨에서 실행함):
+#   docker run --rm -v stueng-data:/data alpine chown -R 10001:10001 /data
+RUN useradd --system --uid 10001 --user-group --no-create-home app \
+ && mkdir -p /data && chown app:app /data
+
 # 복습 기록이 사는 곳. 어휘는 로컬에서 다시 만들 수 있지만 이건 여기밖에 없다.
 VOLUME ["/data"]
 ENV VOCAB_DB_URL=sqlite:////data/vocab.db
+
+USER app
 
 EXPOSE 8080
 CMD ["uvicorn", "vocab.app.main:app", "--host", "0.0.0.0", "--port", "8080", "--workers", "1"]
