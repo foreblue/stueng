@@ -180,8 +180,11 @@ def _call_chat(prompt: str, model: str) -> str:
     payload = {
         "model": model,
         "messages": [{"role": "user", "content": prompt}],
+        # 외부 글(팟캐스트 대본 등)이 프롬프트에 실리므로 백엔드 에이전트를 읽기 전용으로 띄운다.
+        "safety_mode": "inspect",
     }
-    resp = requests.post(url, json=payload, timeout=config.AI_TIMEOUT_SEC)
+    headers ={"Authorization": f"Bearer {config.PROXY_API_KEY}"} if config.PROXY_API_KEY else {}
+    resp = requests.post(url, json=payload, headers=headers, timeout=config.AI_TIMEOUT_SEC)
     resp.raise_for_status()
     data = resp.json()
     return data["choices"][0]["message"]["content"]

@@ -191,6 +191,7 @@ Postgres 로 옮기려면 `requirements-app.txt` 의 `psycopg[binary]` 주석을
 | --- | --- | --- |
 | `TELEGRAM_BOT_TOKEN` / `TELEGRAM_CHAT_ID` | 로컬 | 알림 |
 | `PROXY_URL` | 로컬 | LLM 프록시. 기본 `http://localhost:9000` |
+| `PROXY_API_KEY` | 로컬 | LLM 프록시 Bearer 키. unified-proxy 의 `PROXY_API_KEY` 와 같은 값 |
 | `AI_MODELS` | 로컬 | 폴백 순서 |
 | `VOCAB_SERVER_URL` | 로컬 | 배포된 서버 주소 |
 | `VOCAB_APP_URL` | 로컬 | 알림에 넣을 주소. 비우면 서버 주소를 쓴다 |

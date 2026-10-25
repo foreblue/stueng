@@ -25,6 +25,7 @@ def _env_csv(name: str, default: str) -> list[str]:
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
 PROXY_URL = os.environ.get("PROXY_URL", "http://localhost:9000")
+PROXY_API_KEY = os.environ.get("PROXY_API_KEY", "")
 
 DEFAULT_AI_MODELS = [
     # gemini backend은 현재 기본 요청 대상에서 제외.
